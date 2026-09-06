@@ -100,6 +100,17 @@ class NotFound(AppError):
     message = "Not found."
 
 
+# Declared on the v1 router so the envelope is part of the published contract
+# and lands in the generated TypeScript client. "default" covers every status
+# not otherwise documented, which is exactly what this envelope does.
+ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    "default": {
+        "model": ErrorResponse,
+        "description": "Error envelope returned for every failure.",
+    }
+}
+
+
 def _envelope(
     *,
     status_code: int,

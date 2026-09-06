@@ -8,10 +8,10 @@ sources.
 - [`PLAN.md`](./PLAN.md) — the nine-phase roadmap and per-phase definition of done.
 - [`docs/`](./docs) — architecture, API, security, and decision records.
 
-**Current status: Phase 2 (authentication backend).** The stack runs and the
-quality gates are wired; registration, login, refresh rotation with reuse
-detection, logout, and password reset all work. The auth UI lands in Phase 3,
-conversations in Phase 4, the agent in Phase 5, streaming in Phases 6–7.
+**Current status: Phase 3 (authentication frontend).** You can register, sign
+in, stay signed in across reloads, reset a password from an emailed link, and
+sign out, through the UI. Conversations land in Phase 4, the agent in Phase 5,
+streaming in Phases 6–7.
 
 ## Stack
 
@@ -78,7 +78,8 @@ make test         # pytest + vitest
 make lint         # ruff + eslint + prettier --check
 make typecheck    # mypy + tsc
 make format       # auto-fix both sides
-make openapi      # regenerate ./openapi.json
+make openapi          # regenerate ./openapi.json
+make generate-client  # regenerate ./openapi.json and the typed frontend client
 make down         # stop the stack
 ```
 

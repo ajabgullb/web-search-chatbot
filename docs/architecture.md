@@ -1,6 +1,6 @@
 # Architecture
 
-Status: reflects Phase 2 (authentication backend). Updated as each phase lands — see
+Status: reflects Phase 3 (authentication frontend). Updated as each phase lands — see
 [`PLAN.md`](../PLAN.md) for what is coming and [`AGENTS.md`](../AGENTS.md) for
 the contract this implements.
 
@@ -104,3 +104,33 @@ TanStack Query, styling via Tailwind CSS v4 tokens with shadcn/ui conventions
 (`src/styles/globals.css`). The dev server proxies `/api` to the backend so the
 browser sees a single origin — the same shape as production behind a proxy,
 which keeps cookie and CORS behaviour honest in development.
+
+### The API client
+
+`src/api/generated/schema.d.ts` is generated from `openapi.json` and never
+hand-edited; `src/api/client.ts` is hand-written because it holds the session.
+See [ADR-0004](adr/0004-generated-api-client.md).
+
+Three invariants live in `client.ts`:
+
+1. The access token is a module variable — never `localStorage`, never
+   `sessionStorage`. ESLint fails the build on either, in both the bare-global
+   and `window.` spellings.
+2. Concurrent 401s share **one** refresh. Rotation is single-use, so a second
+   concurrent refresh would present a retired token and the server would revoke
+   the whole family.
+3. A request is replayed at most once, and only when refreshing actually
+   returned a token. There is no code path that can loop.
+
+### Session lifecycle
+
+A reload loses the in-memory token but keeps the HttpOnly refresh cookie, so
+`AuthProvider` makes exactly one refresh attempt on mount and then settles into
+`authenticated` or `anonymous`. Failure is not an error — it is the normal
+state of a visitor — so it never redirects. Route guards wait out the
+`bootstrapping` state before deciding, which is what stops a signed-in user
+being bounced to `/login` on every reload.
+
+`RequireAuth` stores the attempted location in navigation state so the login
+page can return the user there. `/reset-password` is deliberately public: a
+stale session in another tab must not block a reset from an emailed link.

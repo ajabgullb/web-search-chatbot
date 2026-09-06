@@ -29,10 +29,27 @@ export default tseslint.config(
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
       // Auth tokens live in memory only (AGENTS.md §6). Make a slip loud.
+      // Both spellings are covered: the bare global and the window property,
+      // because banning only the global leaves `window.localStorage` open.
       'no-restricted-globals': [
         'error',
         { name: 'localStorage', message: 'Never store auth state in localStorage.' },
         { name: 'sessionStorage', message: 'Never store auth state in sessionStorage.' },
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'window',
+          property: 'localStorage',
+          message:
+            'Browser storage is off-limits for auth state. Non-credential preferences may ' +
+            'opt out with an explicit eslint-disable and a comment saying why.',
+        },
+        {
+          object: 'window',
+          property: 'sessionStorage',
+          message: 'Browser storage is off-limits for auth state.',
+        },
       ],
     },
   },

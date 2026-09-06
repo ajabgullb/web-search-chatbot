@@ -2,8 +2,9 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 import { BrowserRouter } from 'react-router'
 
-import { AppRoutes } from '@/app/routes'
 import { createQueryClient } from '@/app/queryClient'
+import { AppRoutes } from '@/app/routes'
+import { AuthProvider } from '@/features/auth/AuthContext'
 
 export function App() {
   // Created in state so React 19 StrictMode's double-invoke does not build
@@ -12,9 +13,11 @@ export function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </AuthProvider>
     </QueryClientProvider>
   )
 }

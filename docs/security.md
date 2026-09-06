@@ -1,7 +1,7 @@
 # Security
 
-Status: reflects Phase 2 (authentication backend). The frontend controls land
-in Phase 3; agent and streaming controls in Phases 5–7.
+Status: reflects Phase 3 (authentication frontend). Agent and streaming
+controls land in Phases 5–7.
 
 ## Authentication
 
@@ -75,7 +75,16 @@ users; rate limiting blunts enumeration through this route.
   base-uri 'none'` (relaxed only for the Swagger docs page, which loads a CDN
   bundle). HSTS is added in production.
 - **Browser storage is off-limits for auth.** ESLint fails the build on
-  `localStorage` / `sessionStorage`.
+  `localStorage` and `sessionStorage`, in both the bare-global and `window.`
+  spellings. The access token is a module variable in `src/api/client.ts` and
+  is gone when the tab closes. The single documented exception is the light/dark
+  theme preference, which carries an explicit `eslint-disable` and a reason.
+- **One refresh at a time.** The client coalesces concurrent 401s into a single
+  refresh. Firing several would present an already-rotated token and trip the
+  server's reuse detection, logging the user out of every device — a
+  self-inflicted denial of service.
+- **No retry loops.** A request is replayed at most once, and only if the
+  refresh produced a token. A dead session surfaces the original 401.
 
 ## Rate limiting
 

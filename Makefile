@@ -96,8 +96,8 @@ typecheck-frontend:
 openapi: ## Export the OpenAPI schema to ./openapi.json
 	cd $(BACKEND) && uv run python -m scripts.export_openapi ../openapi.json
 
-generate-client: openapi ## Regenerate the typed frontend API client (wired up in Phase 3)
-	@echo "Client generation is set up in Phase 3 -- see PLAN.md."
+generate-client: openapi ## Regenerate the typed frontend API client from openapi.json
+	cd $(FRONTEND) && npm run generate-client
 
 clean: ## Remove build artefacts and caches
 	rm -rf $(FRONTEND)/dist $(FRONTEND)/coverage

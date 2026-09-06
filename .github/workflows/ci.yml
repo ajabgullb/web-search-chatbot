@@ -102,6 +102,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The committed client must match the committed schema. Regenerating and
+      # diffing catches a backend schema change that never reached the client.
+      - name: Check the generated API client is current
+        run: |
+          npm run generate-client
+          git diff --exit-code src/api/generated
+
   docker:
     runs-on: ubuntu-latest
     steps:
