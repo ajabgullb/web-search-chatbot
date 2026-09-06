@@ -1,6 +1,7 @@
 /** Helpers shared by component tests. */
 
 import { render } from '@testing-library/react'
+import { StrictMode } from 'react'
 import type { ReactElement } from 'react'
 import { vi } from 'vitest'
 
@@ -51,8 +52,15 @@ export function stubApi(routes: Record<string, () => Response | Promise<Response
   return fetchMock
 }
 
+/**
+ * Render under `StrictMode`, exactly as `main.tsx` does.
+ *
+ * Not a detail: StrictMode mounts effects twice, and an effect whose cleanup
+ * cancels shared in-flight work will hang forever in the browser while passing
+ * a plain `render`. Tests must exercise the same path production runs.
+ */
 export function renderApp(ui: ReactElement, { route = '/' } = {}) {
   __resetClientForTests()
   window.history.pushState({}, '', route)
-  return render(ui)
+  return render(<StrictMode>{ui}</StrictMode>)
 }

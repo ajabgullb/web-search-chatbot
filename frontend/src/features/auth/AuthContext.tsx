@@ -10,6 +10,11 @@
  * "nobody is signed in", which is a perfectly normal state for a visitor on
  * the landing page. Treating it as an error is how apps end up bouncing
  * between `/login` and a refresh call forever.
+ *
+ * The bootstrap runs once but is *subscribed to* on every mount. StrictMode
+ * mounts, cleans up, and remounts; if the cleanup discarded the only in-flight
+ * result the app would sit on the spinner forever. Holding the promise in a ref
+ * lets the remount re-attach to the same work.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -24,37 +29,37 @@ import type { AuthContextValue, AuthStatus } from '@/features/auth/context'
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('bootstrapping')
   const [user, setUser] = useState<User | null>(null)
-  // React 19 StrictMode mounts effects twice in development; without this the
-  // bootstrap would fire two refreshes and the second would look like reuse.
-  const bootstrapped = useRef(false)
+  // The single bootstrap attempt, started on first mount and reused by any
+  // later one. A boolean guard is not enough: it would stop the second mount
+  // from *restarting* the work but leave it with no way to see the result.
+  const bootstrap = useRef<Promise<User | null> | null>(null)
 
   useEffect(() => {
-    if (bootstrapped.current) return
-    bootstrapped.current = true
-
-    let cancelled = false
-    void (async () => {
+    bootstrap.current ??= (async (): Promise<User | null> => {
       const token = await refreshAccessToken()
-      if (cancelled) return
-
-      if (token === null) {
-        setUser(null)
-        setStatus('anonymous')
-        return
-      }
+      if (token === null) return null
 
       try {
-        setUser(await authApi.fetchCurrentUser())
-        setStatus('authenticated')
+        return await authApi.fetchCurrentUser()
       } catch {
+        // A live refresh cookie but an unusable session: drop the token rather
+        // than leave the client holding one the API rejects.
         clearSession()
-        setUser(null)
-        setStatus('anonymous')
+        return null
       }
     })()
 
+    let active = true
+    void bootstrap.current.then((restored) => {
+      if (!active) return
+      setUser(restored)
+      setStatus(restored === null ? 'anonymous' : 'authenticated')
+    })
+
     return () => {
-      cancelled = true
+      // Only detaches this mount's subscription; the shared promise keeps
+      // running and the next mount reads the same result.
+      active = false
     }
   }, [])
 

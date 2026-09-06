@@ -64,6 +64,24 @@ describe('the auth bootstrap', () => {
     expect(await screen.findByText(/signed in as user@example.com/i)).toBeInTheDocument()
   })
 
+  it('resolves under StrictMode, whose cleanup runs before the refresh returns', async () => {
+    // Regression: the bootstrap used a `cancelled` flag set by the effect
+    // cleanup. StrictMode mounts, cleans up, then remounts — so the only
+    // in-flight attempt was discarded and the app sat on the spinner forever,
+    // with /login and /register showing nothing but a loader. `renderApp`
+    // wraps in StrictMode, so this test sees the same double-mount as the
+    // browser does.
+    stubApi({
+      '/auth/refresh': () => jsonResponse(200, tokenPayload),
+      '/users/me': () => jsonResponse(200, testUser),
+    })
+    renderApp(<App />, { route: '/login' })
+
+    await waitFor(() =>
+      expect(screen.queryByText(/restoring your session/i)).not.toBeInTheDocument(),
+    )
+  })
+
   it('settles as anonymous when the refresh fails, without looping', async () => {
     const fetchMock = stubApi({
       '/auth/refresh': () => errorResponse(401, 'invalid_token'),
