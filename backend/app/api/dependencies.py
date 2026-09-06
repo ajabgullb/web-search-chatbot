@@ -1,0 +1,177 @@
+"""Shared FastAPI dependencies.
+
+Long-lived clients live on ``app.state`` and are built once in the lifespan.
+Dependencies read them from the request rather than creating their own.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import Annotated
+
+from fastapi import Depends, Request
+from fastapi.params import Depends as DependsMarker
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.errors import (
+    AccountInactive,
+    AuthenticationRequired,
+    OriginNotAllowed,
+    RateLimited,
+)
+from app.core.config import Settings
+from app.core.rate_limit import RateLimiter
+from app.core.security import TokenError, decode_access_token
+from app.db.session import Database
+from app.models.user import User
+from app.providers.email import EmailSender
+from app.repositories.users import UserRepository
+from app.services.auth import AuthService, ClientContext
+
+# auto_error=False so a missing header raises our envelope, not FastAPI's.
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def get_app_settings(request: Request) -> Settings:
+    """Return the settings this app was *built* with.
+
+    Reading the cached ``get_settings()`` singleton here instead would silently
+    ignore the instance passed to ``create_app``, so an app configured one way
+    could behave another. Every dependency resolves configuration from the
+    running app, never from the process environment.
+    """
+    settings: Settings = request.app.state.settings
+    return settings
+
+
+def get_database(request: Request) -> Database:
+    database: Database = request.app.state.database
+    return database
+
+
+def get_email_sender(request: Request) -> EmailSender:
+    sender: EmailSender = request.app.state.email_sender
+    return sender
+
+
+def get_rate_limiter(request: Request) -> RateLimiter:
+    limiter: RateLimiter = request.app.state.rate_limiter
+    return limiter
+
+
+async def get_session(
+    database: Annotated[Database, Depends(get_database)],
+) -> AsyncIterator[AsyncSession]:
+    async for session in database.session():
+        yield session
+
+
+SettingsDep = Annotated[Settings, Depends(get_app_settings)]
+DatabaseDep = Annotated[Database, Depends(get_database)]
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
+EmailSenderDep = Annotated[EmailSender, Depends(get_email_sender)]
+RateLimiterDep = Annotated[RateLimiter, Depends(get_rate_limiter)]
+
+
+def get_client_context(request: Request) -> ClientContext:
+    """Request metadata recorded against a session, for audit purposes."""
+    return ClientContext(
+        user_agent=request.headers.get("user-agent"),
+        ip=request.client.host if request.client else None,
+    )
+
+
+ClientContextDep = Annotated[ClientContext, Depends(get_client_context)]
+
+
+def get_auth_service(
+    session: SessionDep,
+    settings: SettingsDep,
+    email_sender: EmailSenderDep,
+) -> AuthService:
+    return AuthService(session, settings, email_sender)
+
+
+AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+
+
+async def get_current_user(
+    session: SessionDep,
+    settings: SettingsDep,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
+) -> User:
+    """Resolve the bearer token to a live, active user.
+
+    The token is re-checked against the database on every request rather than
+    trusted on its claims alone, so a deactivated account loses access
+    immediately instead of at the end of the access token's lifetime.
+    """
+    if credentials is None or not credentials.credentials:
+        raise AuthenticationRequired
+
+    try:
+        claims = decode_access_token(settings, credentials.credentials)
+    except TokenError as exc:
+        raise AuthenticationRequired("The access token is invalid or has expired.") from exc
+
+    user = await UserRepository(session).get_by_id(claims.user_id)
+    if user is None:
+        raise AuthenticationRequired
+    if not user.is_active:
+        raise AccountInactive
+
+    return user
+
+
+CurrentUserDep = Annotated[User, Depends(get_current_user)]
+
+
+def verify_origin(request: Request, settings: SettingsDep) -> None:
+    """Reject cross-site state-changing requests on cookie-authenticated routes.
+
+    ``SameSite=Lax`` already blocks the cross-site POST that CSRF depends on,
+    but it is a browser-side control with historical gaps. Checking ``Origin``
+    server-side is a cheap second lock on the same door.
+
+    Requests with no ``Origin`` at all (curl, a server-side client) are
+    allowed: they are not browsers, so they cannot be a confused deputy.
+    """
+    origin = request.headers.get("origin")
+    if origin is None:
+        return
+    if origin not in settings.cors_origins:
+        raise OriginNotAllowed
+
+
+OriginVerified = Depends(verify_origin)
+
+
+def rate_limit(bucket: str, limit_attribute: str) -> DependsMarker:
+    """Build a dependency that rate-limits a route by client IP.
+
+    The limit is read from settings at request time rather than captured at
+    import time, so tests can raise or lower it without re-importing routes.
+    """
+
+    def dependency(
+        request: Request,
+        settings: SettingsDep,
+        limiter: RateLimiterDep,
+    ) -> None:
+        client_ip = request.client.host if request.client else "unknown"
+        limit: int = getattr(settings, limit_attribute)
+        decision = limiter.hit(
+            f"{bucket}:{client_ip}",
+            limit=limit,
+            window_seconds=settings.rate_limit_window_seconds,
+        )
+        if not decision.allowed:
+            raise RateLimited(
+                headers={"Retry-After": str(decision.retry_after_seconds)},
+                details={"retry_after_seconds": decision.retry_after_seconds},
+            )
+
+    # fastapi.Depends is untyped; the marker class it constructs is what
+    # `dependencies=[...]` actually expects.
+    return DependsMarker(dependency)

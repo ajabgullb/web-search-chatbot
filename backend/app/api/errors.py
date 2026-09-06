@@ -1,0 +1,185 @@
+"""Stable error envelope and the exception handlers that produce it.
+
+Every failure — expected or not — leaves the API in the same shape:
+
+    {"error": {"code": ..., "message": ..., "request_id": ..., "details": ...}}
+
+Clients switch on ``code``, which is part of the contract; ``message`` is for
+humans and may be reworded. Nothing here ever leaks a stack trace, a driver
+message, or a provider response body.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from app.core.request_context import get_request_id
+from app.schemas.errors import ErrorBody, ErrorResponse
+
+logger = logging.getLogger(__name__)
+
+
+class AppError(Exception):
+    """Base class for failures the API reports deliberately."""
+
+    status_code: int = status.HTTP_400_BAD_REQUEST
+    code: str = "bad_request"
+    message: str = "The request could not be processed."
+
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        details: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(message or self.message)
+        self.detail_message = message or self.message
+        self.details = details
+        self.headers = headers
+
+
+class ValidationFailed(AppError):
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "validation_failed"
+    message = "The request body failed validation."
+
+
+class AuthenticationRequired(AppError):
+    status_code = status.HTTP_401_UNAUTHORIZED
+    code = "authentication_required"
+    message = "Authentication is required."
+
+
+class InvalidCredentials(AppError):
+    status_code = status.HTTP_401_UNAUTHORIZED
+    code = "invalid_credentials"
+    message = "Email or password is incorrect."
+
+
+class InvalidToken(AppError):
+    status_code = status.HTTP_401_UNAUTHORIZED
+    code = "invalid_token"
+    message = "The token is missing, expired, or has already been used."
+
+
+class AccountInactive(AppError):
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "account_inactive"
+    message = "This account is not active."
+
+
+class OriginNotAllowed(AppError):
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "origin_not_allowed"
+    message = "The request origin is not allowed."
+
+
+class EmailAlreadyRegistered(AppError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "email_already_registered"
+    message = "An account with that email already exists."
+
+
+class RateLimited(AppError):
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    code = "rate_limited"
+    message = "Too many requests. Try again shortly."
+
+
+class NotFound(AppError):
+    status_code = status.HTTP_404_NOT_FOUND
+    code = "not_found"
+    message = "Not found."
+
+
+def _envelope(
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    body = ErrorResponse(
+        error=ErrorBody(
+            code=code,
+            message=message,
+            request_id=get_request_id(),
+            details=details,
+        )
+    )
+    return JSONResponse(
+        status_code=status_code,
+        content=jsonable_encoder(body),
+        headers=headers,
+    )
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(AppError)
+    async def _app_error(_: Request, exc: AppError) -> JSONResponse:
+        return _envelope(
+            status_code=exc.status_code,
+            code=exc.code,
+            message=exc.detail_message,
+            details=exc.details,
+            headers=exc.headers,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # Field paths and reasons are safe and genuinely useful to a client;
+        # the raw input value is not echoed back.
+        fields = [
+            {"field": ".".join(str(part) for part in error["loc"][1:]), "reason": error["msg"]}
+            for error in exc.errors()
+        ]
+        return _envelope(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            code=ValidationFailed.code,
+            message=ValidationFailed.message,
+            details={"fields": fields},
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        # Covers 404s and the like raised by the framework itself.
+        code = _STATUS_CODES.get(exc.status_code, "http_error")
+        message = exc.detail if isinstance(exc.detail, str) else "Request failed."
+        headers = dict(exc.headers) if exc.headers else None
+        return _envelope(status_code=exc.status_code, code=code, message=message, headers=headers)
+
+    @app.exception_handler(Exception)
+    async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+        # Log the traceback server-side; tell the client nothing but a code
+        # and the request id they can quote in a support message.
+        logger.exception(
+            "unhandled_exception",
+            extra={"path": request.url.path, "method": request.method},
+            exc_info=exc,
+        )
+        return _envelope(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="internal_error",
+            message="An unexpected error occurred.",
+        )
+
+
+_STATUS_CODES = {
+    status.HTTP_401_UNAUTHORIZED: "authentication_required",
+    status.HTTP_403_FORBIDDEN: "forbidden",
+    status.HTTP_404_NOT_FOUND: "not_found",
+    status.HTTP_405_METHOD_NOT_ALLOWED: "method_not_allowed",
+    status.HTTP_409_CONFLICT: "conflict",
+    status.HTTP_413_CONTENT_TOO_LARGE: "payload_too_large",
+    status.HTTP_429_TOO_MANY_REQUESTS: "rate_limited",
+    status.HTTP_503_SERVICE_UNAVAILABLE: "service_unavailable",
+}

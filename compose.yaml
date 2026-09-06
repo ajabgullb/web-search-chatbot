@@ -1,0 +1,78 @@
+# Local development stack. `compose.prod.yaml` (Phase 8) covers deployment.
+name: web-search-chatbot
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+    ports:
+      # Exposed so host tools (alembic, pytest) reach the same database.
+      # Host ports are overridable because developers often run several stacks.
+      - '${POSTGRES_HOST_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  mailpit:
+    # Catches every outbound email in development; UI on http://localhost:8025.
+    image: axllent/mailpit:latest
+    ports:
+      - '${MAILPIT_SMTP_HOST_PORT:-1025}:1025'
+      - '${MAILPIT_UI_HOST_PORT:-8025}:8025'
+    environment:
+      MP_MAX_MESSAGES: 500
+
+  api:
+    build:
+      context: ./backend
+      target: dev
+    env_file:
+      - .env
+    environment:
+      # Overrides the host-facing value in .env: inside the network the
+      # database is reachable as `postgres`, not `localhost`.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+    # Single dev replica, so migrating here is safe. Production runs migrations
+    # as an explicit release job instead (AGENTS.md §14).
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - '${API_HOST_PORT:-8000}:8000'
+    volumes:
+      # Bind-mount source for hot reload, but keep the image's virtualenv.
+      - ./backend:/app
+      - /app/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+
+  web:
+    build:
+      context: ./frontend
+      target: dev
+    environment:
+      # Vite proxies /api to the API container so the browser sees one origin.
+      VITE_API_PROXY_TARGET: http://api:8000
+    ports:
+      - '${WEB_HOST_PORT:-5173}:5173'
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
