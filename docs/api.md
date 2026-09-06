@@ -77,6 +77,43 @@ never in a response body — it is set as an `HttpOnly` cookie scoped to
 }
 ```
 
+### Conversations
+
+All routes require a bearer token. Every query is constrained by the caller's
+`user_id` in SQL, so another user's conversation is indistinguishable from one
+that does not exist: both answer `404 conversation_not_found`, never `403`.
+
+| Method | Path | Purpose | Success |
+| --- | --- | --- | --- |
+| GET | `/conversations?cursor=&limit=` | Newest-first page of the caller's threads | `200` |
+| POST | `/conversations` | Create a thread (`title` optional) | `201` |
+| GET | `/conversations/{id}` | One thread | `200` |
+| PATCH | `/conversations/{id}` | Rename | `200` |
+| DELETE | `/conversations/{id}` | Soft delete | `204` |
+| GET | `/conversations/{id}/messages?before=&limit=` | Page of turns, oldest-first within the page | `200` |
+
+Paged responses share one envelope:
+
+```json
+{
+  "items": [ ... ],
+  "next_cursor": "MjAyNi0wOS0wNlQxNjoyOTozMS4uLg",
+  "has_more": true
+}
+```
+
+`next_cursor` is `null` exactly when there is nothing more to read, so a client
+loops until it is null rather than comparing counts to a page size. Cursors are
+opaque: pass back what the server returned and never construct one. Conversations
+page forward from the newest (`cursor`); messages page *backwards* into history
+(`before`), because a thread is read from the bottom.
+
+`limit` is bounded to 1–100 and defaults to 20.
+
+Only `user` and `assistant` turns are serialized. `system` and `tool` rows exist
+in the same table and are never exposed — they would leak prompt text and raw
+provider payloads.
+
 ### Error codes
 
 | Code | Status | Meaning |
@@ -89,4 +126,6 @@ never in a response body — it is set as an `HttpOnly` cookie scoped to
 | `origin_not_allowed` | 403 | Cross-site request to a cookie-authenticated route |
 | `email_already_registered` | 409 | Registration conflict |
 | `rate_limited` | 429 | Too many attempts; see the `Retry-After` header |
+| `conversation_not_found` | 404 | Unknown id, or one owned by another user — deliberately the same |
+| `invalid_cursor` | 400 | Pagination cursor was not produced by this API |
 | `internal_error` | 500 | Unexpected failure; quote `request_id` |

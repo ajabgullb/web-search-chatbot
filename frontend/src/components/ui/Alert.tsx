@@ -1,29 +1,32 @@
 import { cn } from '@/lib/utils'
 
 interface AlertProps {
-  variant?: 'error' | 'success'
+  variant?: 'error' | 'success' | 'info'
+  title?: string
   children: React.ReactNode
   className?: string
 }
 
 /**
- * Form-level feedback.
+ * Form- and page-level feedback.
  *
- * `role="alert"` makes it an ARIA live region, so a failed sign-in is
- * announced instead of silently appearing above the form.
+ * An error interrupts (`role="alert"`, assertive); anything else waits for a
+ * pause (`role="status"`, polite). Announcing an informational note assertively
+ * would cut across whatever a screen-reader user was already listening to.
  */
-export function Alert({ variant = 'error', children, className }: AlertProps) {
+export function Alert({ variant = 'error', title, children, className }: AlertProps) {
+  const styles = {
+    error: 'border-destructive/40 bg-destructive/10 text-destructive',
+    success: 'border-border bg-muted text-foreground',
+    info: 'border-border bg-muted text-foreground',
+  }[variant]
+
   return (
     <div
-      role="alert"
-      className={cn(
-        'rounded-md border px-3 py-2 text-sm',
-        variant === 'error'
-          ? 'border-destructive/40 bg-destructive/10 text-destructive'
-          : 'border-border bg-muted text-foreground',
-        className,
-      )}
+      role={variant === 'error' ? 'alert' : 'status'}
+      className={cn('rounded-md border px-3 py-2 text-sm', styles, className)}
     >
+      {title ? <p className="font-medium">{title}</p> : null}
       {children}
     </div>
   )

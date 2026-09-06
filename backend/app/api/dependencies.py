@@ -28,6 +28,7 @@ from app.models.user import User
 from app.providers.email import EmailSender
 from app.repositories.users import UserRepository
 from app.services.auth import AuthService, ClientContext
+from app.services.conversations import ConversationService
 
 # auto_error=False so a missing header raises our envelope, not FastAPI's.
 _bearer_scheme = HTTPBearer(auto_error=False)
@@ -125,6 +126,13 @@ async def get_current_user(
 
 
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
+
+
+def get_conversation_service(session: SessionDep) -> ConversationService:
+    return ConversationService(session)
+
+
+ConversationServiceDep = Annotated[ConversationService, Depends(get_conversation_service)]
 
 
 def verify_origin(request: Request, settings: SettingsDep) -> None:

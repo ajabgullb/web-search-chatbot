@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -12,6 +13,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import Settings
+from app.db.session import Database
+from app.models.message import MessageRole
+from app.repositories.users import UserRepository
+from app.services.conversations import ConversationService
 from tests.fakes import RecordingEmailSender
 
 REGISTER_PASSWORD = "correct-horse-battery-staple"
@@ -27,7 +32,8 @@ async def clean_database(settings: Settings) -> AsyncIterator[None]:
     """
     engine = create_async_engine(str(settings.database_url))
     statement = text(
-        "TRUNCATE users, auth_sessions, password_reset_tokens RESTART IDENTITY CASCADE"
+        "TRUNCATE users, auth_sessions, password_reset_tokens, conversations, messages "
+        "RESTART IDENTITY CASCADE"
     )
     async with engine.begin() as connection:
         await connection.execute(statement)
@@ -65,6 +71,38 @@ async def register(
 
 def auth_header(tokens: dict[str, Any]) -> dict[str, str]:
     return {"Authorization": f"Bearer {tokens['access_token']}"}
+
+
+async def create_conversation(
+    client: AsyncClient, headers: dict[str, str], *, title: str | None = None
+) -> dict[str, Any]:
+    response = await client.post("/api/v1/conversations", json={"title": title}, headers=headers)
+    assert response.status_code == 201, response.text
+    return dict(response.json())
+
+
+async def seed_messages(
+    app: FastAPI, *, user_email: str, conversation_id: uuid.UUID, contents: list[tuple[str, str]]
+) -> None:
+    """Write turns straight through the service.
+
+    Phase 4 has no endpoint that creates messages — they arrive with a run in
+    Phase 6 — so tests exercise the same service call that endpoint will make
+    rather than inserting rows behind the application's back.
+    """
+    database: Database = app.state.database
+    async for session in database.session():
+        user = await UserRepository(session).get_by_email(user_email)
+        assert user is not None
+        service = ConversationService(session)
+        for role, content in contents:
+            await service.append_message(
+                user=user,
+                conversation_id=conversation_id,
+                role=MessageRole(role),
+                content=content,
+            )
+        break
 
 
 # Python's cookiejar appends ".local" to a dotless host name, so the cookie the

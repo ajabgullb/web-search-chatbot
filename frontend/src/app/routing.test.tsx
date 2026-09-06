@@ -60,8 +60,9 @@ describe('the auth bootstrap', () => {
     })
     renderApp(<App />, { route: '/chat' })
 
-    // A reload with a live cookie must land on /chat, not on /login.
-    expect(await screen.findByText(/signed in as user@example.com/i)).toBeInTheDocument()
+    // A reload with a live cookie must land on /chat, not on /login. The
+    // sidebar's account block is the proof the guarded shell actually rendered.
+    expect(await screen.findByText('user@example.com')).toBeInTheDocument()
   })
 
   it('resolves under StrictMode, whose cleanup runs before the refresh returns', async () => {

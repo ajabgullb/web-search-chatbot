@@ -93,6 +93,12 @@ class Settings(BaseSettings):
     # the ceiling only bounds the work an unauthenticated caller can demand.
     password_max_length: int = 1024
 
+    # --- Conversation and agent budgets ---
+    # Enforced server-side when runs land in Phase 6. It exists now because the
+    # composer shows a live counter against it, and a limit the client invents
+    # for itself is a limit that drifts.
+    max_user_message_chars: int = 16_000
+
     # --- Email ---
     smtp_host: str = ""
     smtp_port: int = 1025

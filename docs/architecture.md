@@ -134,3 +134,40 @@ being bounced to `/login` on every reload.
 `RequireAuth` stores the attempted location in navigation state so the login
 page can return the user there. `/reset-password` is deliberately public: a
 stale session in another tab must not block a reset from an emailed link.
+
+## Conversation domain
+
+Three layers, no shortcuts between them:
+
+```
+routes/conversations.py   parse, delegate, serialize — no ownership logic
+services/conversations.py orchestration, titles, cursor encode/decode, commits
+repositories/            every query constrained by user_id, all the SQL
+```
+
+Ownership is not a check a handler performs; it is a property of every query the
+repository issues. `ConversationRepository.get(user_id=…, conversation_id=…)`
+has no overload that omits the owner, so there is no code path that could forget.
+`MessageRepository` joins `conversations` and constrains `user_id` there too,
+even though the service has already resolved the thread — a future caller that
+passes an unverified id still cannot reach another user's messages.
+
+Titles are derived locally from the first user message: whitespace collapsed,
+cut on a word boundary near 80 characters. No model call, because titling must
+never sit on the critical path of the first answer (`AGENTS.md` §10). A title
+the user chose is never overwritten.
+
+Pagination and soft deletion are recorded in
+[ADR-0005](adr/0005-cursor-pagination-and-soft-deletion.md); Markdown rendering
+in [ADR-0006](adr/0006-markdown-rendering.md).
+
+### Chat frontend
+
+`ChatLayout` owns the sidebar so switching threads does not unmount and refetch
+the history list. `/chat` is an empty state that deliberately does **not**
+auto-create a conversation — a user who lands there, reloads, or signs back in
+would otherwise leave a trail of empty threads.
+
+TanStack Query retries are narrow: a 4xx is the server saying the request itself
+is wrong, and repeating it only delays the error the user needs to see. Transient
+failures still get one more attempt.

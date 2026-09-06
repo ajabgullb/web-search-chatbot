@@ -147,8 +147,9 @@ describe('forgot password', () => {
     await user.click(screen.getByRole('button', { name: /send reset link/i }))
 
     // Mirrors the server, which answers identically for a real and an
-    // unknown address.
-    expect(await screen.findByRole('alert')).toHaveTextContent(/if an account exists/i)
+    // unknown address. Announced as a status rather than an alert: it is
+    // confirmation, not an error interrupting the user.
+    expect(await screen.findByRole('status')).toHaveTextContent(/if an account exists/i)
   })
 })
 
@@ -215,7 +216,8 @@ describe('sign out', () => {
     })
     renderApp(<App />, { route: '/chat' })
 
-    await screen.findByText(/signed in as/i)
+    // The account block in the chat sidebar.
+    await screen.findByText('user@example.com')
     await user.click(screen.getByRole('button', { name: /sign out/i }))
 
     // A failed logout must never strand someone signed in locally.

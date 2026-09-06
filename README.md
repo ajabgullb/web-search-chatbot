@@ -8,10 +8,15 @@ sources.
 - [`PLAN.md`](./PLAN.md) — the nine-phase roadmap and per-phase definition of done.
 - [`docs/`](./docs) — architecture, API, security, and decision records.
 
-**Current status: Phase 3 (authentication frontend).** You can register, sign
-in, stay signed in across reloads, reset a password from an emailed link, and
-sign out, through the UI. Conversations land in Phase 4, the agent in Phase 5,
-streaming in Phases 6–7.
+**Current status: Phase 4 (conversation domain).** You can register, sign in,
+stay signed in across reloads, reset a password from an emailed link, and sign
+out. Inside the app you can create, rename, delete, and page through your own
+conversations, and open one to read its history rendered as sanitized Markdown
+with highlighted code.
+
+The composer is built and accepts input, but **sending does not reach a model
+yet** — the agent arrives in Phase 5 and runs stream in Phases 6–7, so messages
+are created by a run, and there is no run endpoint until then.
 
 ## Stack
 

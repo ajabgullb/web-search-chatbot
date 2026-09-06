@@ -36,16 +36,47 @@ export function errorResponse(status: number, code: string, message = 'Failed.')
 /**
  * Install a fetch stub that routes by path.
  *
+ * Keys may be a bare path (`/users/me`), a path with a query string, or either
+ * prefixed by a method (`POST /conversations`). More specific keys win, so a
+ * test can stub `GET /conversations` and `POST /conversations` separately.
+ *
  * Unmatched paths return 401, which is what an unauthenticated API does — so a
  * test that forgets to stub an endpoint fails loudly rather than hanging.
  */
 type FetchMock = (input: string, init?: RequestInit) => Promise<Response>
+type StubRequest = { url: URL; init: RequestInit | undefined }
+type RouteHandler = (request: StubRequest) => Response | Promise<Response>
 
-export function stubApi(routes: Record<string, () => Response | Promise<Response>>) {
-  const fetchMock = vi.fn<FetchMock>((input) => {
-    const path = String(input).replace('/api/v1', '')
-    const handler = routes[path]
-    if (handler) return Promise.resolve(handler())
+/**
+ * Read a stubbed request's JSON body.
+ *
+ * `fetch` types `body` as a broad BodyInit; the client only ever sends a JSON
+ * string, so the narrowing is safe and is done once here rather than at every
+ * call site.
+ */
+export function readBody<T>(init: RequestInit | undefined): T {
+  const body = init?.body
+  // Narrow rather than coerce: BodyInit also covers Blob and FormData, and
+  // stringifying one of those would silently parse "[object Blob]".
+  return JSON.parse(typeof body === 'string' ? body : '{}') as T
+}
+
+export function stubApi(routes: Record<string, RouteHandler>) {
+  const fetchMock = vi.fn<FetchMock>((input, init) => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    // A base is required because the app calls fetch with a relative path.
+    const url = new URL(String(input), 'http://localhost')
+    const path = url.pathname.replace('/api/v1', '')
+
+    for (const key of [
+      `${method} ${path}${url.search}`,
+      `${method} ${path}`,
+      `${path}${url.search}`,
+      path,
+    ]) {
+      const handler = routes[key]
+      if (handler) return Promise.resolve(handler({ url, init }))
+    }
     return Promise.resolve(errorResponse(401, 'authentication_required'))
   })
   vi.stubGlobal('fetch', fetchMock)

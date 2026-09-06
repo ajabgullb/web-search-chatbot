@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -70,3 +73,27 @@ def test_refresh_cookie_is_secure_outside_development() -> None:
 
 def test_refresh_cookie_path_is_scoped_to_auth() -> None:
     assert Settings(api_v1_prefix="/api/v1").auth_cookie_path == "/api/v1/auth"
+
+
+class TestClientMirroredLimits:
+    """The frontend keeps its own copy of the message limit for the counter.
+
+    A copy that drifts is worse than no copy: the composer would happily accept
+    a message the API then rejects. This pins the two together.
+    """
+
+    def test_the_composer_limit_matches_the_setting(self) -> None:
+        constants = (
+            Path(__file__).resolve().parents[3]
+            / "frontend"
+            / "src"
+            / "features"
+            / "chat"
+            / "constants.ts"
+        )
+        source = constants.read_text(encoding="utf-8")
+
+        match = re.search(r"MAX_MESSAGE_CHARACTERS\s*=\s*([\d_]+)", source)
+        assert match is not None, "MAX_MESSAGE_CHARACTERS is no longer declared"
+
+        assert int(match.group(1).replace("_", "")) == Settings().max_user_message_chars

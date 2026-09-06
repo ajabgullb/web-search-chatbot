@@ -107,6 +107,34 @@ Clients switch on `code`. Stack traces, driver messages, and provider payloads
 never reach a client; unhandled exceptions are logged server-side and reported
 as `internal_error` with the request id the caller can quote.
 
+## Authorization and data isolation
+
+Every conversation and message query is constrained by the authenticated
+`user_id` in SQL, at the repository boundary. There is no "fetch by id" a
+service can call and then forget to check.
+
+A conversation that belongs to someone else and one that never existed give
+**identical** responses: `404` with code `conversation_not_found`, the same
+message, the same shape. A `403` would confirm that a guessed UUID names a real
+row, turning every endpoint into an enumeration oracle. Integration tests assert
+the two responses match, for `GET`, `PATCH`, `DELETE`, and message listing.
+
+Deletion is soft: the row is stamped `deleted_at` and disappears from every read
+path. Rows therefore accumulate; a retention/purge policy is a later concern and
+is not implemented.
+
+## Untrusted content rendering
+
+Assistant messages are rendered as Markdown with raw HTML disabled,
+`rehype-sanitize` applied, and link schemes restricted to `http`/`https` with
+`rel="noopener noreferrer"`. There is no `dangerouslySetInnerHTML` anywhere in
+the frontend. Tests cover `<script>`, `<img onerror>`, `javascript:`, `data:`,
+and `file:` payloads. This matters more from Phase 5, when answers begin to
+paraphrase fetched web pages. See
+[ADR-0006](adr/0006-markdown-rendering.md).
+
+User messages are rendered as plain text, never parsed as Markdown.
+
 ## Configuration fails closed
 
 Booting with `ENVIRONMENT=production` is refused when `JWT_SECRET` is a known
@@ -117,8 +145,9 @@ extends these checks; they are never relaxed to make an environment start.
 ## Not yet implemented
 
 Email verification (`is_verified` exists but is unused), CSP tuned to the
-frontend, distributed rate limits, log redaction filters, and the agent-side
-controls for untrusted web content.
+frontend, distributed rate limits, log redaction filters, a purge policy for
+soft-deleted conversations, and the agent-side controls for untrusted web
+content.
 
 ## Reporting
 

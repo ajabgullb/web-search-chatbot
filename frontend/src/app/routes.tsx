@@ -1,7 +1,9 @@
 import { Route, Routes } from 'react-router'
 
 import { RedirectIfAuthenticated, RequireAuth } from '@/features/auth/RouteGuards'
+import { ChatLayout } from '@/features/chat/ChatLayout'
 import { ChatPage } from '@/routes/ChatPage'
+import { ConversationPage } from '@/routes/ConversationPage'
 import { ForgotPasswordPage } from '@/routes/ForgotPasswordPage'
 import { LandingPage } from '@/routes/LandingPage'
 import { LoginPage } from '@/routes/LoginPage'
@@ -33,7 +35,11 @@ export function AppRoutes() {
       </Route>
 
       <Route element={<RequireAuth />}>
-        <Route path="/chat" element={<ChatPage />} />
+        {/* One layout for both, so switching threads keeps the sidebar mounted. */}
+        <Route element={<ChatLayout />}>
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/chat/:conversationId" element={<ConversationPage />} />
+        </Route>
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />

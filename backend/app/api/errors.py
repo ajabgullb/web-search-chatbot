@@ -100,6 +100,23 @@ class NotFound(AppError):
     message = "Not found."
 
 
+class ConversationNotFound(NotFound):
+    """Raised for an unknown id *and* for one owned by somebody else.
+
+    Deliberately indistinguishable: a distinct 403 would confirm that a guessed
+    UUID names a real conversation.
+    """
+
+    code = "conversation_not_found"
+    message = "Conversation not found."
+
+
+class InvalidCursor(AppError):
+    status_code = status.HTTP_400_BAD_REQUEST
+    code = "invalid_cursor"
+    message = "The pagination cursor is not valid."
+
+
 # Declared on the v1 router so the envelope is part of the published contract
 # and lands in the generated TypeScript client. "default" covers every status
 # not otherwise documented, which is exactly what this envelope does.

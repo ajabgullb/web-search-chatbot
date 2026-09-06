@@ -1,35 +1,41 @@
-import { useAuth } from '@/features/auth/useAuth'
+import { MessageSquarePlus } from 'lucide-react'
+import { useNavigate } from 'react-router'
+
 import { Button } from '@/components/ui/Button'
-import { ThemeToggle } from '@/components/ThemeToggle'
+import { useCreateConversation } from '@/features/chat/queries'
 
 /**
- * Placeholder for the authenticated area.
+ * `/chat` with no conversation selected.
  *
- * It exists so the route guard has something real to protect. Phase 4 replaces
- * it with the sidebar and conversation view.
+ * Deliberately does *not* auto-create a conversation on mount: a user who
+ * lands here, reloads, or signs out and back in would leave a trail of empty
+ * threads. The thread is created when they ask for one.
  */
 export function ChatPage() {
-  const { user, signOut } = useAuth()
+  const navigate = useNavigate()
+  const createConversation = useCreateConversation()
 
   return (
-    <div className="min-h-dvh">
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
-        <h1 className="text-sm font-semibold">Web Search Chatbot</h1>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">{user?.display_name}</span>
-          <ThemeToggle />
-          <Button variant="outline" size="sm" onClick={() => void signOut()}>
-            Sign out
-          </Button>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-2xl px-6 py-16 text-center">
-        <h2 className="text-2xl font-semibold">You&rsquo;re signed in</h2>
-        <p className="mt-2 text-muted-foreground">
-          Signed in as {user?.email}. Conversations and the chat interface arrive in Phase 4.
+    <main className="flex flex-1 items-center justify-center p-6">
+      <div className="max-w-md text-center">
+        <h1 className="text-2xl font-semibold">Start a conversation</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Ask a question and the assistant will search the web when it helps, with sources you can
+          check.
         </p>
-      </main>
-    </div>
+        <Button
+          className="mt-6"
+          disabled={createConversation.isPending}
+          onClick={() =>
+            createConversation.mutate(undefined, {
+              onSuccess: (conversation) => void navigate(`/chat/${conversation.id}`),
+            })
+          }
+        >
+          <MessageSquarePlus className="size-4" aria-hidden />
+          New chat
+        </Button>
+      </div>
+    </main>
   )
 }
