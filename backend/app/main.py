@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent.checkpointer import checkpointer_for
+from app.agent.context import AgentLimits
+from app.agent.graph import build_graph
 from app.api.errors import register_exception_handlers
 from app.api.middleware import RequestIdMiddleware, SecurityHeadersMiddleware
 from app.api.v1.router import api_router
@@ -21,6 +24,8 @@ from app.core.logging import setup_logging
 from app.core.rate_limit import InMemoryRateLimiter
 from app.db.session import Database
 from app.providers.email import build_email_sender
+from app.providers.llm import build_llm_provider
+from app.providers.search import build_search_provider
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +36,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.database = Database(settings)
     app.state.email_sender = build_email_sender(settings)
     app.state.rate_limiter = InMemoryRateLimiter()
+
+    # Provider clients and the compiled graph are built once here. A graph
+    # compiled per request would rebuild its node table on every message, and a
+    # provider client per request would open a new connection pool each time.
+    app.state.llm_provider = build_llm_provider(settings)
+    app.state.search_provider = build_search_provider(settings)
+    app.state.agent_limits = AgentLimits.from_settings(settings)
+
     logger.info("application startup: environment=%s", settings.environment)
-    try:
-        yield
-    finally:
-        await app.state.database.dispose()
-        logger.info("application shutdown complete")
+    async with AsyncExitStack() as stack:
+        checkpointer = await stack.enter_async_context(checkpointer_for(settings))
+        app.state.agent_graph = build_graph(checkpointer)
+        try:
+            yield
+        finally:
+            await app.state.search_provider.aclose()
+            await app.state.database.dispose()
+            logger.info("application shutdown complete")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

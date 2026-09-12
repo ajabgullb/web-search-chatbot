@@ -8,22 +8,28 @@ sources.
 - [`PLAN.md`](./PLAN.md) — the nine-phase roadmap and per-phase definition of done.
 - [`docs/`](./docs) — architecture, API, security, and decision records.
 
-**Current status: Phase 4 (conversation domain).** You can register, sign in,
+**Current status: Phase 5 (agent core).** You can register, sign in,
 stay signed in across reloads, reset a password from an emailed link, and sign
 out. Inside the app you can create, rename, delete, and page through your own
 conversations, and open one to read its history rendered as sanitized Markdown
 with highlighted code.
 
-The composer is built and accepts input, but **sending does not reach a model
-yet** — the agent arrives in Phase 5 and runs stream in Phases 6–7, so messages
-are created by a run, and there is no run endpoint until then.
+Behind the scenes the LangGraph agent now exists: it decides whether to search,
+runs bounded Tavily searches, answers with validated citations, and checkpoints
+each conversation thread to PostgreSQL. It is proven entirely through tests
+with fake providers. The composer still **does not reach the model** — the run
+endpoint and SSE stream that connect the two arrive in Phases 6–7.
+
+No provider key is needed to run the app or the tests in development. Set
+`LLM_API_KEY` and `SEARCH_API_KEY` in `.env` once Phase 6 makes the agent
+reachable; production refuses to start without them.
 
 ## Stack
 
 | | |
 | --- | --- |
 | Backend | Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 (async), Alembic, PostgreSQL 16 |
-| Agent | LangChain + LangGraph (Phase 5) |
+| Agent | LangChain + LangGraph (explicit graph, PostgreSQL checkpointer), Tavily search |
 | Frontend | React 19, TypeScript (strict), Vite, React Router, TanStack Query, Tailwind CSS v4, shadcn/ui |
 | Tooling | uv, npm, Ruff, mypy, ESLint, Prettier, pytest, Vitest, Playwright |
 | Runtime | Docker Compose; GitHub Actions for CI |

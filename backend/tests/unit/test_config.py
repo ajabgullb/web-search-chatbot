@@ -29,35 +29,49 @@ def test_cors_origins_never_wildcard() -> None:
     assert "*" not in settings.cors_origins
 
 
+def production_settings(**overrides: object) -> Settings:
+    """A production configuration that passes every check, for tests to spoil."""
+    values: dict[str, object] = {
+        "environment": Environment.production,
+        "jwt_secret": "a" * 40,
+        "frontend_origin": "https://app.example.com",
+        "llm_api_key": "sk-not-a-real-key",
+        "search_api_key": "tvly-not-a-real-key",
+    }
+    values.update(overrides)
+    return Settings(**values)  # type: ignore[arg-type]
+
+
 def test_is_production_flag() -> None:
-    valid_production = Settings(
-        environment=Environment.production,
-        jwt_secret="a" * 40,
-        frontend_origin="https://app.example.com",
-    )
-    assert valid_production.is_production is True
+    assert production_settings().is_production is True
     assert Settings(environment=Environment.development).is_production is False
 
 
 def test_production_rejects_the_development_secret() -> None:
     """Fail closed: a default secret must stop the process, not warn."""
     with pytest.raises(ValidationError, match="JWT_SECRET"):
-        Settings(environment=Environment.production, frontend_origin="https://app.example.com")
+        production_settings(jwt_secret="dev-insecure-change-me-not-for-production")
+
+
+def test_production_requires_provider_credentials() -> None:
+    """An API that boots without them looks healthy and fails on the first
+    question a user asks. Refuse at startup instead."""
+    with pytest.raises(ValidationError, match="LLM_API_KEY"):
+        production_settings(llm_api_key="")
+    with pytest.raises(ValidationError, match="SEARCH_API_KEY"):
+        production_settings(search_api_key="")
+
+
+def test_development_does_not_require_provider_credentials() -> None:
+    """Phases 1-4 of this repository run with no provider keys at all."""
+    assert Settings(environment=Environment.development, llm_api_key="").llm_api_key == ""
 
 
 def test_production_rejects_a_non_https_or_wildcard_origin() -> None:
     with pytest.raises(ValidationError, match="https"):
-        Settings(
-            environment=Environment.production,
-            jwt_secret="a" * 40,
-            frontend_origin="http://app.example.com",
-        )
+        production_settings(frontend_origin="http://app.example.com")
     with pytest.raises(ValidationError, match="wildcard"):
-        Settings(
-            environment=Environment.production,
-            jwt_secret="a" * 40,
-            frontend_origin="https://*.example.com",
-        )
+        production_settings(frontend_origin="https://*.example.com")
 
 
 def test_short_jwt_secret_is_rejected_everywhere() -> None:

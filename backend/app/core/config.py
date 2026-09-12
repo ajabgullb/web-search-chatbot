@@ -99,6 +99,35 @@ class Settings(BaseSettings):
     # for itself is a limit that drifts.
     max_user_message_chars: int = 16_000
 
+    # --- LLM provider ---
+    # One OpenAI-compatible implementation covers OpenAI, OpenRouter, Groq, and
+    # a local Ollama: only the base URL and model name change.
+    llm_provider: str = "openai_compatible"
+    llm_model: str = "gpt-4o-mini"
+    llm_api_key: str = ""
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_timeout_seconds: float = 60.0
+    # Bounds the cost and latency of a single answer. Separate from the run
+    # deadline, which bounds the whole graph.
+    llm_max_output_tokens: int = 1_500
+    # Low but not zero: the answer should be stable across retries without
+    # reading like a lookup table.
+    llm_temperature: float = 0.2
+
+    # --- Search provider ---
+    search_provider: str = "tavily"
+    search_api_key: str = ""
+    search_base_url: str = "https://api.tavily.com"
+
+    # --- Agent budgets ---
+    max_searches_per_run: int = 3
+    max_results_per_search: int = 5
+    search_timeout_seconds: float = 20.0
+    run_timeout_seconds: float = 90.0
+    # Turns of history handed to the model, newest first. Older turns are
+    # dropped before the context budget is reached rather than after.
+    max_context_messages: int = 20
+
     # --- Email ---
     smtp_host: str = ""
     smtp_port: int = 1025
@@ -138,6 +167,12 @@ class Settings(BaseSettings):
             problems.append("FRONTEND_ORIGIN must be an explicit origin, never a wildcard")
         if not self.frontend_origin.startswith("https://"):
             problems.append("FRONTEND_ORIGIN must use https in production")
+        # A production API that boots without provider credentials looks healthy
+        # and fails on the first user question. Refuse at startup instead.
+        if not self.llm_api_key:
+            problems.append("LLM_API_KEY is required in production")
+        if not self.search_api_key:
+            problems.append("SEARCH_API_KEY is required in production")
         if problems:
             raise ValueError("Invalid production configuration: " + "; ".join(problems))
         return self

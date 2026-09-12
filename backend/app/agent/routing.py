@@ -1,0 +1,162 @@
+"""Deciding whether to search, and where the graph goes next.
+
+Heuristics run first and the model is consulted only when they are silent. That
+ordering is deliberate: a greeting should not cost a model call to classify, the
+obvious cases are the common ones, and a deterministic rule is testable in a way
+that a model's judgement is not. The model handles the genuinely ambiguous
+middle, which is where it earns its latency.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from pydantic import BaseModel, Field
+
+MAX_MODEL_QUERIES = 3
+
+
+class SearchDecision(BaseModel):
+    """The structured reply the model must produce when heuristics abstain."""
+
+    should_search: bool = Field(description="True when a web search is needed.")
+    rationale: str = Field(default="", max_length=200, description="One short clause.")
+    queries: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_MODEL_QUERIES,
+        description="Keyword queries to run; empty when not searching.",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class HeuristicDecision:
+    """``should_search`` is ``None`` when the heuristics decline to decide."""
+
+    should_search: bool | None
+    rationale: str
+
+
+def _pattern(*alternatives: str) -> re.Pattern[str]:
+    return re.compile(r"\b(?:" + "|".join(alternatives) + r")\b", re.IGNORECASE)
+
+
+# Nothing here needs the web. Anchored to the whole message so that "hi, what is
+# the current bitcoin price" is not mistaken for a greeting.
+_GREETING = re.compile(
+    r"^\W*(?:hi|hey|hello|yo|thanks|thank you|thx|ty|good (?:morning|afternoon|evening)"
+    r"|how are you|what'?s up|bye|goodbye|see you)\W*$",
+    re.IGNORECASE,
+)
+
+# Work performed on text the user supplied. The material is already in the
+# conversation, so searching for it would be searching for nothing.
+_TEXT_TASK_VERB = _pattern(
+    "rewrite",
+    "reword",
+    "rephrase",
+    "paraphrase",
+    "translate",
+    "proofread",
+    "summarise",
+    "summarize",
+    "shorten",
+    "expand",
+    "format",
+    "reformat",
+    "edit",
+    "correct",
+    "fix",
+)
+_TEXT_TASK_OBJECT = _pattern(
+    "this",
+    "that",
+    "the following",
+    "below",
+    "above",
+    "my",
+    "it",
+)
+
+# Answers that change over time. These must be looked up, because a model's
+# recollection of them is stale by construction.
+_FRESHNESS = _pattern(
+    "today",
+    "tonight",
+    "yesterday",
+    "tomorrow",
+    "currently",
+    "current",
+    "latest",
+    "newest",
+    "recent",
+    "recently",
+    "news",
+    "breaking",
+    "right now",
+    "so far",
+    "this week",
+    "this month",
+    "this year",
+    "as of",
+    "up to date",
+    "upcoming",
+    "released",
+    "release date",
+    "price",
+    "stock",
+    "weather",
+    "forecast",
+    "score",
+    "who won",
+    "still",
+    "nowadays",
+)
+_YEAR = re.compile(r"\b20(?:2[4-9]|[3-9]\d)\b")
+
+# An explicit request for evidence. Phrase-level rather than word-level so that
+# "open source" and "a link list" do not trigger a search on their own.
+_WANTS_SOURCES = re.compile(
+    r"(?:cite\s+(?:your|the|some|any)|citations?\b|with\s+sources|provide\s+sources"
+    r"|give\s+me\s+sources|any\s+sources|list\s+sources|link\s+to|references?\s+for"
+    r"|back\s+(?:this|that|it)\s+up|according\s+to\s+(?:the\s+)?(?:latest|current))",
+    re.IGNORECASE,
+)
+
+
+def heuristic_search_decision(question: str) -> HeuristicDecision:
+    """Classify a question without a model call where the answer is obvious."""
+    text = question.strip()
+    if not text:
+        return HeuristicDecision(False, "empty message")
+
+    if _GREETING.match(text):
+        return HeuristicDecision(False, "greeting or small talk")
+
+    if _TEXT_TASK_VERB.search(text) and _TEXT_TASK_OBJECT.search(text):
+        return HeuristicDecision(False, "operates on text already supplied")
+
+    if _WANTS_SOURCES.search(text):
+        return HeuristicDecision(True, "user asked for sources")
+
+    if _FRESHNESS.search(text) or _YEAR.search(text):
+        return HeuristicDecision(True, "answer depends on current information")
+
+    # Everything else is genuinely ambiguous; let the model look at it.
+    return HeuristicDecision(None, "")
+
+
+def route_after_decision(should_search: bool) -> str:
+    return "web_search" if should_search else "answer_direct"
+
+
+def route_after_search(source_count: int) -> str:
+    """Where to go once searching is done.
+
+    With no usable source there is nothing to synthesize from. Routing to
+    ``answer_direct`` answers from the model's own knowledge instead, under a
+    prompt that forbids citations — which is honest. Sending an empty source
+    list to ``synthesize`` would invite exactly the fabricated citation the
+    whole pipeline exists to prevent.
+    """
+    return "synthesize" if source_count > 0 else "answer_direct"

@@ -1,7 +1,6 @@
 # Security
 
-Status: reflects Phase 3 (authentication frontend). Agent and streaming
-controls land in Phases 5–7.
+Status: reflects Phase 5 (agent core). Streaming controls land in Phases 6–7.
 
 ## Authentication
 
@@ -129,25 +128,65 @@ Assistant messages are rendered as Markdown with raw HTML disabled,
 `rehype-sanitize` applied, and link schemes restricted to `http`/`https` with
 `rel="noopener noreferrer"`. There is no `dangerouslySetInnerHTML` anywhere in
 the frontend. Tests cover `<script>`, `<img onerror>`, `javascript:`, `data:`,
-and `file:` payloads. This matters more from Phase 5, when answers begin to
-paraphrase fetched web pages. See
+and `file:` payloads. This matters because answers paraphrase fetched web
+pages. See
 [ADR-0006](adr/0006-markdown-rendering.md).
 
 User messages are rendered as plain text, never parsed as Markdown.
 
+## Agent and untrusted web content
+
+Retrieved web text is hostile input (OWASP LLM01). The controls below bound what
+injected text can *do* — choose a tool argument, fabricate a citation, reach a
+secret — not what the model can be persuaded to *say*. An answer can still be
+wrong because a page lied; that is why answers carry citations the user can check.
+
+- **A declared data boundary.** The synthesis system prompt states that search
+  results are untrusted data that cannot change instructions, request secrets,
+  or authorize tools. Each snippet is additionally fenced as
+  `<<<untrusted-excerpt … >>>` so the boundary is visible in the token stream,
+  not only asserted. Only provider snippets are used, capped at 1,200
+  characters; page bodies are never requested.
+- **Tool arguments never come from retrieved content.** Queries come only from
+  the user's own message (heuristic path) or from the structured decision made
+  *before* any search runs. They are validated — whitespace collapsed, 400
+  characters, deduplicated, count-capped — and the graph has no back edge, so
+  result text cannot trigger another search.
+- **Citations are verified, not trusted.** The model may cite only the `S1…Sn`
+  labels we assigned. Unknown labels are stripped from the answer; a direct
+  answer has every marker stripped; a searched answer left with no valid
+  citation is flagged `degraded` with a user-facing notice.
+- **URLs are validated before they can be rendered.** Only `http`/`https`;
+  control characters rejected; tracking parameters dropped; canonicalized for
+  deduplication. The frontend re-checks schemes at render time regardless.
+- **Secrets stay out of state and logs.** Provider clients and credentials live
+  in runtime context and are never checkpointed — an integration test asserts a
+  stored checkpoint contains neither. Prompts contain no secrets. Provider error
+  bodies, which can echo a key or a query, are never logged or propagated; logs
+  record the exception class and HTTP status only.
+- **Budgets.** At most 3 searches, 5 results each, 20 s per search, 90 s per run,
+  1,500 output tokens, and 20 history messages — all configurable. Exactly one
+  retry, for transient failures only; the OpenAI SDK's own retries are disabled
+  so the retry budget has a single owner.
+
+Covered by `tests/unit/agent/test_prompt_injection.py`,
+`tests/unit/agent/test_citations.py`, `tests/unit/agent/test_urls.py`, and
+`tests/integration/test_checkpointer.py`. See [ADR-0007](adr/0007-agent-core.md).
+
 ## Configuration fails closed
 
 Booting with `ENVIRONMENT=production` is refused when `JWT_SECRET` is a known
-placeholder or under 32 characters, or when `FRONTEND_ORIGIN` contains a
-wildcard or is not `https`. `DATABASE_URL` must use the async driver. Phase 8
+placeholder or under 32 characters, when `FRONTEND_ORIGIN` contains a
+wildcard or is not `https`, or when `LLM_API_KEY` or `SEARCH_API_KEY` is
+missing. `DATABASE_URL` must use the async driver. Phase 8
 extends these checks; they are never relaxed to make an environment start.
 
 ## Not yet implemented
 
 Email verification (`is_verified` exists but is unused), CSP tuned to the
 frontend, distributed rate limits, log redaction filters, a purge policy for
-soft-deleted conversations, and the agent-side controls for untrusted web
-content.
+soft-deleted conversations, per-run rate limits, and the streaming and
+cancellation controls that arrive with runs in Phase 6.
 
 ## Reporting
 
