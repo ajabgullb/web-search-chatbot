@@ -10,6 +10,7 @@ import uuid
 from collections.abc import Callable
 
 import pytest
+from langchain_core.messages import HumanMessage
 
 from app.agent.context import AgentContext, AgentLimits
 from app.agent.graph import AgentResult, build_graph, run_agent
@@ -58,7 +59,7 @@ def run() -> Callable[..., object]:
         return await run_agent(
             graph,
             context=make_context(llm, search, limits=limits),
-            user_message=message,
+            history=[HumanMessage(content=message)],
         )
 
     return _run

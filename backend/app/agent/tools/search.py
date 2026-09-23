@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.agent.context import AgentLimits
+from app.agent.events import AgentEvent, SearchCompleted, SearchStarted
 from app.agent.state import Source
 from app.providers.search import (
     SearchHit,
@@ -223,13 +225,18 @@ async def execute_searches(
     *,
     provider: SearchProvider,
     limits: AgentLimits,
+    emit: Callable[[AgentEvent], None] | None = None,
 ) -> SearchOutcome:
     """Run the validated queries and return normalized, deduplicated sources.
 
     Retries exactly one transient failure per query. A permanent failure — bad
     credentials, a rejected query, exhausted quota — is never retried: the
     second call fails identically and costs the same.
+
+    ``emit`` reports each search as it starts and finishes. It is a plain
+    callback so this module stays ignorant of how progress reaches a user.
     """
+    report = emit or (lambda _event: None)
     outcome = SearchOutcome()
     budget = validate_queries(queries, limit=limits.max_searches_per_run)
     if not budget:
@@ -244,6 +251,7 @@ async def execute_searches(
         if outcome.searches_run >= limits.max_searches_per_run:
             break
 
+        report(SearchStarted(query=query))
         hits: list[SearchHit] | None = None
         for attempt in (1, 2):
             try:
@@ -264,17 +272,18 @@ async def execute_searches(
         outcome.executed_queries.append(query)
         if hits is None:
             failures += 1
+            report(SearchCompleted(query=query, sources=(), failed=True))
             continue
 
-        outcome.sources.extend(
-            normalize_hits(
-                hits,
-                seen_keys=seen_keys,
-                next_ordinal=len(outcome.sources) + 1,
-                retrieved_at=datetime.now(UTC),
-                limit=limits.max_results_per_search,
-            )
+        new_sources = normalize_hits(
+            hits,
+            seen_keys=seen_keys,
+            next_ordinal=len(outcome.sources) + 1,
+            retrieved_at=datetime.now(UTC),
+            limit=limits.max_results_per_search,
         )
+        outcome.sources.extend(new_sources)
+        report(SearchCompleted(query=query, sources=tuple(new_sources)))
 
     if failures and failures == len(outcome.executed_queries):
         outcome.provider_failed = True

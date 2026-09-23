@@ -90,7 +90,11 @@ users; rate limiting blunts enumeration through this route.
 Per-IP sliding windows on `login` (10), `register` (5), and `forgot-password`
 (5), each over 5 minutes, returning `429` with `Retry-After`.
 
-The Phase 2 limiter is **in-process**: with N replicas the effective limit is
+Starting a run is limited **per user** (20 per minute by default,
+`RATE_LIMIT_RUNS`): it is the path that spends provider money, and a per-IP
+limit would let one account on a shared network starve the others.
+
+The limiter is **in-process**: with N replicas the effective limit is
 N x the configured value. Phase 8 replaces it with a Redis-backed limiter
 behind the same interface.
 
@@ -118,8 +122,16 @@ message, the same shape. A `403` would confirm that a guessed UUID names a real
 row, turning every endpoint into an enumeration oracle. Integration tests assert
 the two responses match, for `GET`, `PATCH`, `DELETE`, and message listing.
 
+Runs follow the same rule: `GET /runs/{id}` and `POST /runs/{id}/cancel` are
+scoped by `user_id` *and* by the conversation still being live, so another
+user's run, a guessed id, and a run in a deleted conversation all answer
+`404 run_not_found`. A retry must name a user message in the caller's own
+conversation; a message id taken from another user's thread is `404`.
+Idempotency keys are scoped per user, so one client's key can never collide
+with, or replay, another user's run.
+
 Deletion is soft: the row is stamped `deleted_at` and disappears from every read
-path. Rows therefore accumulate; a retention/purge policy is a later concern and
+path. Deleting a conversation also cancels its active run. Rows therefore accumulate; a retention/purge policy is a later concern and
 is not implemented.
 
 ## Untrusted content rendering
@@ -173,6 +185,37 @@ Covered by `tests/unit/agent/test_prompt_injection.py`,
 `tests/unit/agent/test_citations.py`, `tests/unit/agent/test_urls.py`, and
 `tests/integration/test_checkpointer.py`. See [ADR-0007](adr/0007-agent-core.md).
 
+## Streaming
+
+What leaves the server during a run is decided in one place: internal agent
+events are mapped to wire events by `RunManager._to_public`, and anything a node
+writes that is not one of our event types is dropped before it can be streamed.
+
+- **No reasoning.** `agent.status` is a coarse phase label (`thinking`,
+  `searching`, `writing`). Rationales for the search decision are log-only.
+- **No page text in progress events.** `search.completed` carries source
+  metadata only. A snippet reaches the client only inside a `citation`, the one
+  place a retrieved excerpt is meant to be shown — and it is rendered as
+  sanitized Markdown like every answer.
+- **No invented citations on screen.** Deltas pass through the same citation
+  validation as the saved answer, holding back a partial `[S…` only until it can
+  be checked, so an unknown label is never displayed even briefly.
+- **No raw errors.** Failures reach the stream as a stable code and a message we
+  wrote; only the code is stored. Provider exception text never reaches a
+  client or the database.
+- **No prompts or secrets.** An integration test scans a whole stream for the
+  system prompts, the untrusted-content fence, a configured API key, and an
+  injected instruction outside citation events.
+
+Bounded by: the message length limit (enforced server-side), the output-token
+limit, the run deadline, the per-user run rate limit, and one active run per
+conversation. A disconnected client cancels its run, so an abandoned tab does
+not keep spending.
+
+Run endpoints authenticate with the in-memory bearer token, not the refresh
+cookie, so they need no `Origin` check: a cross-site page cannot attach the
+token.
+
 ## Configuration fails closed
 
 Booting with `ENVIRONMENT=production` is refused when `JWT_SECRET` is a known
@@ -184,9 +227,9 @@ extends these checks; they are never relaxed to make an environment start.
 ## Not yet implemented
 
 Email verification (`is_verified` exists but is unused), CSP tuned to the
-frontend, distributed rate limits, log redaction filters, a purge policy for
-soft-deleted conversations, per-run rate limits, and the streaming and
-cancellation controls that arrive with runs in Phase 6.
+frontend, distributed rate limits and cross-replica cancellation signals
+(Redis, Phase 8), log redaction filters, a request body size limit, and a purge
+policy for soft-deleted conversations and their runs.
 
 ## Reporting
 

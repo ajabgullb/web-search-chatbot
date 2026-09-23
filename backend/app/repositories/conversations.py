@@ -79,6 +79,12 @@ class ConversationRepository:
         result = await self._session.execute(statement)
         return result.scalars().all()
 
+    async def touch(self, *, conversation_id: uuid.UUID, at: datetime) -> None:
+        """Bump ``updated_at`` so an active thread rises to the top of the list."""
+        await self._session.execute(
+            update(Conversation).where(Conversation.id == conversation_id).values(updated_at=at)
+        )
+
     async def soft_delete(
         self, *, user_id: uuid.UUID, conversation_id: uuid.UUID, at: datetime
     ) -> bool:

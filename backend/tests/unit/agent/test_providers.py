@@ -13,6 +13,7 @@ from app.core.config import Settings
 from app.providers.llm import (
     LLMPermanentError,
     LLMTransientError,
+    OpenAICompatibleLLM,
     build_llm_provider,
     classify_llm_error,
 )
@@ -136,3 +137,48 @@ class TestFactories:
 
 def _client_returning(response: httpx.Response) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: response))
+
+
+class TestLLMStreaming:
+    """The real provider class, with LangChain's own fake chat model standing in
+    for the network. Proves chunk mapping and error classification without a
+    request."""
+
+    @staticmethod
+    def _provider_with(model: object) -> OpenAICompatibleLLM:
+        provider = OpenAICompatibleLLM(settings_with(llm_api_key="test"))
+        provider._client = model  # type: ignore[assignment]
+        return provider
+
+    async def test_text_arrives_in_chunks(self) -> None:
+        from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        model = GenericFakeChatModel(messages=iter([AIMessage(content="Hello there, friend.")]))
+        provider = self._provider_with(model)
+
+        chunks = [c async for c in provider.stream([HumanMessage(content="hi")])]
+
+        assert len(chunks) > 1
+        assert "".join(c.text for c in chunks) == "Hello there, friend."
+
+    async def test_a_failure_mid_stream_is_classified(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        class _Exploding:
+            async def astream(self, _messages: object) -> object:
+                yield AIMessageChunkLike("partial ")
+                raise _StatusError(503)
+
+        provider = self._provider_with(_Exploding())
+        received: list[str] = []
+        with pytest.raises(LLMTransientError):
+            async for chunk in provider.stream([HumanMessage(content="hi")]):
+                received.append(chunk.text)
+        assert received == ["partial "]
+
+
+class AIMessageChunkLike:
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.usage_metadata = None

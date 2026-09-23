@@ -189,6 +189,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conversations/{conversation_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Run
+         * @description Send a message (or retry the latest one) and stream the answer.
+         */
+        post: operations["create_run_api_v1_conversations__conversation_id__runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health/live": {
         parameters: {
             query?: never;
@@ -223,6 +243,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run
+         * @description A run's current state; the recovery path when a stream is lost.
+         */
+        get: operations["get_run_api_v1_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Run
+         * @description Stop a run. Safe to repeat; a finished run is returned unchanged.
+         */
+        post: operations["cancel_run_api_v1_runs__run_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/me": {
         parameters: {
             query?: never;
@@ -244,6 +304,70 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AgentStatusEvent */
+        AgentStatusEvent: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Sequence */
+            sequence: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "thinking" | "searching" | "writing";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "agent.status";
+        };
+        /** CitationEvent */
+        CitationEvent: {
+            citation: components["schemas"]["CitationRead"];
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Sequence */
+            sequence: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "citation";
+        };
+        /**
+         * CitationRead
+         * @description A source an answer cites. ``source_id`` matches the ``[S1]`` markers in
+         *     the message content; ``ordinal`` numbers the rendered source list.
+         */
+        CitationRead: {
+            /** Display Url */
+            display_url: string;
+            /** Ordinal */
+            ordinal: number;
+            /** Published At */
+            published_at: string | null;
+            /** Publisher */
+            publisher: string | null;
+            /**
+             * Retrieved At
+             * Format: date-time
+             */
+            retrieved_at: string;
+            /** Snippet */
+            snippet: string;
+            /** Source Id */
+            source_id: string;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+        };
         /**
          * ConversationCreate
          * @description A new thread. The title is optional — most clients let it be derived.
@@ -336,8 +460,48 @@ export interface components {
             /** Password */
             password: string;
         };
+        /**
+         * MessageCompletedEvent
+         * @description Terminal. ``message`` is canonical: clients replace the streamed text
+         *     with its content rather than trusting their own concatenation.
+         */
+        MessageCompletedEvent: {
+            message: components["schemas"]["MessageRead"];
+            run: components["schemas"]["RunRead"];
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Sequence */
+            sequence: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "message.completed";
+        };
+        /** MessageDeltaEvent */
+        MessageDeltaEvent: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Sequence */
+            sequence: number;
+            /** Text */
+            text: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "message.delta";
+        };
         /** MessageRead */
         MessageRead: {
+            /** Citations */
+            citations?: components["schemas"]["CitationRead"][];
             /** Content */
             content: string;
             /**
@@ -351,10 +515,17 @@ export interface components {
              */
             created_at: string;
             /**
+             * Degraded
+             * @default false
+             */
+            degraded: boolean;
+            /**
              * Id
              * Format: uuid
              */
             id: string;
+            /** Notice */
+            notice?: string | null;
             role: components["schemas"]["PublicMessageRole"];
             /** Sequence Number */
             sequence_number: number;
@@ -440,6 +611,205 @@ export interface components {
             password: string;
             /** Token */
             token: string;
+        };
+        /**
+         * RunCancelledEvent
+         * @description Terminal.
+         */
+        RunCancelledEvent: {
+            /** Reason */
+            reason: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Sequence */
+            sequence: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "run.cancelled";
+        };
+        /**
+         * RunCreate
+         * @description Start a run: either for a new message, or to retry the latest one.
+         *
+         *     A retry reuses the user message already stored, so trying again after a
+         *     failure or a stop never duplicates the question in the history.
+         */
+        RunCreate: {
+            /** Content */
+            content?: string | null;
+            /** Retry Message Id */
+            retry_message_id?: string | null;
+        };
+        /** RunErrorRead */
+        RunErrorRead: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Retryable */
+            retryable: boolean;
+        };
+        /**
+         * RunFailedEvent
+         * @description Terminal.
+         */
+        RunFailedEvent: {
+            error: components["schemas"]["RunErrorRead"];
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Sequence */
+            sequence: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "run.failed";
+        };
+        /**
+         * RunRead
+         * @description A run's canonical state — the recovery path after a lost stream.
+         */
+        RunRead: {
+            assistant_message?: components["schemas"]["MessageRead"] | null;
+            /** Assistant Message Id */
+            assistant_message_id: string | null;
+            /** Cancel Reason */
+            cancel_reason?: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /**
+             * Conversation Id
+             * Format: uuid
+             */
+            conversation_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            error?: components["schemas"]["RunErrorRead"] | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Search Count */
+            search_count: number;
+            /** Started At */
+            started_at: string | null;
+            status: components["schemas"]["RunStatus"];
+            usage: components["schemas"]["RunUsage"];
+            /**
+             * User Message Id
+             * Format: uuid
+             */
+            user_message_id: string;
+        };
+        /** RunStartedEvent */
+        RunStartedEvent: {
+            /**
+             * Conversation Id
+             * Format: uuid
+             */
+            conversation_id: string;
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Sequence */
+            sequence: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "run.started";
+            user_message: components["schemas"]["MessageRead"];
+        };
+        /**
+         * RunStatus
+         * @enum {string}
+         */
+        RunStatus: "queued" | "running" | "completed" | "failed" | "cancelled";
+        /** RunUsage */
+        RunUsage: {
+            /** Completion Tokens */
+            completion_tokens?: number | null;
+            /** Prompt Tokens */
+            prompt_tokens?: number | null;
+        };
+        /** SearchCompletedEvent */
+        SearchCompletedEvent: {
+            /**
+             * Failed
+             * @default false
+             */
+            failed: boolean;
+            /** Query */
+            query: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Sequence */
+            sequence: number;
+            /** Sources */
+            sources: components["schemas"]["SourceRead"][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "search.completed";
+        };
+        /** SearchStartedEvent */
+        SearchStartedEvent: {
+            /** Query */
+            query: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Sequence */
+            sequence: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "search.started";
+        };
+        /**
+         * SourceRead
+         * @description Metadata of a search result. Deliberately no snippet: progress events
+         *     describe what was found, they do not carry retrieved page text.
+         */
+        SourceRead: {
+            /** Display Url */
+            display_url: string;
+            /** Published At */
+            published_at: string | null;
+            /** Publisher */
+            publisher: string | null;
+            /** Source Id */
+            source_id: string;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
         };
         /**
          * TokenResponse
@@ -911,6 +1281,44 @@ export interface operations {
             };
         };
     };
+    create_run_api_v1_conversations__conversation_id__runs_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Unique per logical request; reuse it when retrying the same request. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunCreate"];
+            };
+        };
+        responses: {
+            /** @description A text/event-stream of run events. Each frame's `data` is one of these JSON objects; `sequence` starts at 1 and increases by one. See docs/api.md. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string & (components["schemas"]["RunStartedEvent"] | components["schemas"]["AgentStatusEvent"] | components["schemas"]["SearchStartedEvent"] | components["schemas"]["SearchCompletedEvent"] | components["schemas"]["MessageDeltaEvent"] | components["schemas"]["CitationEvent"] | components["schemas"]["MessageCompletedEvent"] | components["schemas"]["RunFailedEvent"] | components["schemas"]["RunCancelledEvent"]);
+                };
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     live_api_v1_health_live_get: {
         parameters: {
             query?: never;
@@ -965,6 +1373,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadinessResponse"];
+                };
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_run_api_v1_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunRead"];
+                };
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_run_api_v1_runs__run_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunRead"];
                 };
             };
             /** @description Error envelope returned for every failure. */

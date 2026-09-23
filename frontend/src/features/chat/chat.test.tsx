@@ -235,18 +235,21 @@ describe('conversation history', () => {
 
     // The markdown renderer is a lazy chunk, so the formatted output arrives
     // after the plain-text Suspense fallback. Resolving a dynamic import can
-    // take over a second while the suite's other files compile in parallel,
-    // hence the explicit timeout rather than the 1s default.
+    // take several seconds while the suite's other files compile in parallel,
+    // hence the explicit wait rather than the 1s default.
     await waitFor(
       () =>
         expect(container.querySelector('.prose-chat strong')).toHaveTextContent('last row seen'),
-      { timeout: 5000 },
+      { timeout: 10_000 },
     )
 
     // The user's own asterisks would be markdown if we rendered them as such.
     const userTurn = screen.getByLabelText('Your message')
     expect(within(userTurn).getByText('How does keyset pagination work?')).toBeInTheDocument()
-  })
+    // The test's own budget must exceed the wait inside it. At the 5s default
+    // it equalled the waitFor timeout, so under load the test timed out before
+    // the wait could succeed.
+  }, 15_000)
 
   it('shows a not-found state for a conversation that is gone', async () => {
     stubApi({

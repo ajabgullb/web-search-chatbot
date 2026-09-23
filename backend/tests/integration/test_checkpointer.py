@@ -1,9 +1,11 @@
 """LangGraph's PostgreSQL checkpointer against a real database.
 
-Two things matter here. A thread must come back with its earlier turns, because
-that is what makes a conversation a conversation after a restart. And a
-checkpoint must contain no client and no credential, because it is long-lived
-storage that outlives the request that wrote it.
+Three things matter here. The checkpoint must agree with the history the
+application hands the graph — no duplicated turn after a retry, no orphaned
+question after a failure — because the ``messages`` table is the canonical
+history and the checkpoint mirrors it. Threads must never mix. And a checkpoint
+must contain no client and no credential, because it is long-lived storage
+that outlives the request that wrote it.
 """
 
 from __future__ import annotations
@@ -11,11 +13,13 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.checkpointer import checkpointer_for, psycopg_dsn
 from app.agent.context import AgentContext, AgentLimits
 from app.agent.graph import build_graph, run_agent
 from app.core.config import Settings
+from app.providers.llm import LLMTransientError
 from tests.fakes import FakeLLM, FakeSearchProvider, hit
 
 pytestmark = pytest.mark.integration
@@ -53,9 +57,14 @@ def test_the_dsn_is_translated_for_psycopg() -> None:
     )
 
 
-async def test_a_thread_resumes_with_its_earlier_turns(settings: Settings) -> None:
+def _config(conversation_id: uuid.UUID) -> dict[str, dict[str, str]]:
+    return {"configurable": {"thread_id": str(conversation_id)}}
+
+
+async def test_a_thread_continues_from_the_history_it_is_given(settings: Settings) -> None:
     conversation_id = uuid.uuid4()
     search = FakeSearchProvider()
+    question = HumanMessage(content="hello", id="m1")
 
     async with checkpointer_for(settings) as saver:
         graph = build_graph(saver)
@@ -63,30 +72,59 @@ async def test_a_thread_resumes_with_its_earlier_turns(settings: Settings) -> No
         first = await run_agent(
             graph,
             context=context_for(conversation_id, FakeLLM(answers=["Hello there."]), search),
-            user_message="hello",
+            history=[question],
         )
         assert first.succeeded
 
-        # A second run on the same thread, through a fresh context, exactly as
-        # the next HTTP request would arrive.
+        # The next request arrives with the history the database recorded,
+        # through a fresh context, exactly as the run executor supplies it.
         llm = FakeLLM(answers=["You said hello."])
         second = await run_agent(
             graph,
             context=context_for(conversation_id, llm, search),
-            user_message="what did I just say?",
+            history=[
+                question,
+                AIMessage(content="Hello there.", id="m2"),
+                HumanMessage(content="what did I just say?", id="m3"),
+            ],
         )
         assert second.succeeded
+        assert "Hello there." in llm.last_prompt_text
 
-        # The resumed run saw the earlier turns, not just the new message.
-        prompt = llm.last_prompt_text
-        assert "hello" in prompt
-        assert "Hello there." in prompt
+        snapshot = await graph.aget_state(_config(conversation_id))  # type: ignore[arg-type]
+        contents = [message.content for message in snapshot.values["messages"]]
+        # Four turns, not six: the supplied history replaced the checkpoint's
+        # copy instead of being appended to it.
+        assert contents == ["hello", "Hello there.", "what did I just say?", "You said hello."]
 
-        snapshot = await graph.aget_state(
-            {"configurable": {"thread_id": str(conversation_id)}}  # type: ignore[arg-type]
+
+async def test_a_retry_after_a_failure_leaves_no_orphaned_turn(settings: Settings) -> None:
+    """The failed attempt's question must not appear twice once it succeeds."""
+    conversation_id = uuid.uuid4()
+    search = FakeSearchProvider()
+    question = HumanMessage(content="hello", id="m1")
+
+    async with checkpointer_for(settings) as saver:
+        graph = build_graph(saver)
+        failed = await run_agent(
+            graph,
+            context=context_for(
+                conversation_id, FakeLLM(answer_error=LLMTransientError("503")), search
+            ),
+            history=[question],
         )
-        roles = [type(message).__name__ for message in snapshot.values["messages"]]
-        assert roles == ["HumanMessage", "AIMessage", "HumanMessage", "AIMessage"]
+        assert not failed.succeeded
+
+        retried = await run_agent(
+            graph,
+            context=context_for(conversation_id, FakeLLM(answers=["Hi."]), search),
+            history=[question],
+        )
+        assert retried.succeeded
+
+        snapshot = await graph.aget_state(_config(conversation_id))  # type: ignore[arg-type]
+        contents = [message.content for message in snapshot.values["messages"]]
+        assert contents == ["hello", "Hi."]
 
 
 async def test_threads_are_isolated_from_each_other(settings: Settings) -> None:
@@ -99,20 +137,18 @@ async def test_threads_are_isolated_from_each_other(settings: Settings) -> None:
         await run_agent(
             graph,
             context=context_for(first_id, FakeLLM(answers=["One."]), search),
-            user_message="first conversation",
+            history=[HumanMessage(content="first conversation")],
         )
         llm = FakeLLM(answers=["Two."])
         await run_agent(
             graph,
             context=context_for(second_id, llm, search),
-            user_message="second conversation",
+            history=[HumanMessage(content="second conversation")],
         )
 
         assert "first conversation" not in llm.last_prompt_text
 
-        snapshot = await graph.aget_state(
-            {"configurable": {"thread_id": str(second_id)}}  # type: ignore[arg-type]
-        )
+        snapshot = await graph.aget_state(_config(second_id))  # type: ignore[arg-type]
         assert len(snapshot.values["messages"]) == 2
 
 
@@ -126,12 +162,10 @@ async def test_no_client_or_credential_is_written_to_a_checkpoint(settings: Sett
         await run_agent(
             graph,
             context=context_for(conversation_id, FakeLLM(answers=["Answer [S1]."]), search),
-            user_message="what is the latest news",
+            history=[HumanMessage(content="what is the latest news")],
         )
 
-        snapshot = await graph.aget_state(
-            {"configurable": {"thread_id": str(conversation_id)}}  # type: ignore[arg-type]
-        )
+        snapshot = await graph.aget_state(_config(conversation_id))  # type: ignore[arg-type]
         values = snapshot.values
         assert "llm" not in values
         assert "search" not in values

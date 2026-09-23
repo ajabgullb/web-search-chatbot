@@ -1,6 +1,142 @@
 {
   "components": {
     "schemas": {
+      "AgentStatusEvent": {
+        "properties": {
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "thinking",
+              "searching",
+              "writing"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "const": "agent.status",
+            "default": "agent.status",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "run_id",
+          "status"
+        ],
+        "title": "AgentStatusEvent",
+        "type": "object"
+      },
+      "CitationEvent": {
+        "properties": {
+          "citation": {
+            "$ref": "#/components/schemas/CitationRead"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "type": {
+            "const": "citation",
+            "default": "citation",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "run_id",
+          "citation"
+        ],
+        "title": "CitationEvent",
+        "type": "object"
+      },
+      "CitationRead": {
+        "description": "A source an answer cites. ``source_id`` matches the ``[S1]`` markers in\nthe message content; ``ordinal`` numbers the rendered source list.",
+        "properties": {
+          "display_url": {
+            "title": "Display Url",
+            "type": "string"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "retrieved_at": {
+            "format": "date-time",
+            "title": "Retrieved At",
+            "type": "string"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ordinal",
+          "source_id",
+          "url",
+          "display_url",
+          "title",
+          "publisher",
+          "snippet",
+          "published_at",
+          "retrieved_at"
+        ],
+        "title": "CitationRead",
+        "type": "object"
+      },
       "ConversationCreate": {
         "description": "A new thread. The title is optional \u2014 most clients let it be derived.",
         "properties": {
@@ -171,8 +307,81 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "MessageCompletedEvent": {
+        "description": "Terminal. ``message`` is canonical: clients replace the streamed text\nwith its content rather than trusting their own concatenation.",
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/MessageRead"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunRead"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "type": {
+            "const": "message.completed",
+            "default": "message.completed",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "run_id",
+          "message",
+          "run"
+        ],
+        "title": "MessageCompletedEvent",
+        "type": "object"
+      },
+      "MessageDeltaEvent": {
+        "properties": {
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "message.delta",
+            "default": "message.delta",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "run_id",
+          "text"
+        ],
+        "title": "MessageDeltaEvent",
+        "type": "object"
+      },
       "MessageRead": {
         "properties": {
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/CitationRead"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
           "content": {
             "title": "Content",
             "type": "string"
@@ -187,10 +396,26 @@
             "title": "Created At",
             "type": "string"
           },
+          "degraded": {
+            "default": false,
+            "title": "Degraded",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
           },
           "role": {
             "$ref": "#/components/schemas/PublicMessageRole"
@@ -386,6 +611,448 @@
           "password"
         ],
         "title": "ResetPasswordRequest",
+        "type": "object"
+      },
+      "RunCancelledEvent": {
+        "description": "Terminal.",
+        "properties": {
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "type": {
+            "const": "run.cancelled",
+            "default": "run.cancelled",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "run_id",
+          "reason"
+        ],
+        "title": "RunCancelledEvent",
+        "type": "object"
+      },
+      "RunCreate": {
+        "description": "Start a run: either for a new message, or to retry the latest one.\n\nA retry reuses the user message already stored, so trying again after a\nfailure or a stop never duplicates the question in the history.",
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "maxLength": 100000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "retry_message_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Message Id"
+          }
+        },
+        "title": "RunCreate",
+        "type": "object"
+      },
+      "RunErrorRead": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "title": "RunErrorRead",
+        "type": "object"
+      },
+      "RunFailedEvent": {
+        "description": "Terminal.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/RunErrorRead"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "type": {
+            "const": "run.failed",
+            "default": "run.failed",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "run_id",
+          "error"
+        ],
+        "title": "RunFailedEvent",
+        "type": "object"
+      },
+      "RunRead": {
+        "description": "A run's canonical state \u2014 the recovery path after a lost stream.",
+        "properties": {
+          "assistant_message": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "assistant_message_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assistant Message Id"
+          },
+          "cancel_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Reason"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "conversation_id": {
+            "format": "uuid",
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunErrorRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "search_count": {
+            "title": "Search Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/RunUsage"
+          },
+          "user_message_id": {
+            "format": "uuid",
+            "title": "User Message Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "user_message_id",
+          "assistant_message_id",
+          "status",
+          "search_count",
+          "usage",
+          "created_at",
+          "started_at",
+          "completed_at"
+        ],
+        "title": "RunRead",
+        "type": "object"
+      },
+      "RunStartedEvent": {
+        "properties": {
+          "conversation_id": {
+            "format": "uuid",
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "type": {
+            "const": "run.started",
+            "default": "run.started",
+            "title": "Type",
+            "type": "string"
+          },
+          "user_message": {
+            "$ref": "#/components/schemas/MessageRead"
+          }
+        },
+        "required": [
+          "sequence",
+          "run_id",
+          "conversation_id",
+          "user_message"
+        ],
+        "title": "RunStartedEvent",
+        "type": "object"
+      },
+      "RunStatus": {
+        "enum": [
+          "queued",
+          "running",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "RunStatus",
+        "type": "string"
+      },
+      "RunUsage": {
+        "properties": {
+          "completion_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion Tokens"
+          },
+          "prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Tokens"
+          }
+        },
+        "title": "RunUsage",
+        "type": "object"
+      },
+      "SearchCompletedEvent": {
+        "properties": {
+          "failed": {
+            "default": false,
+            "title": "Failed",
+            "type": "boolean"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceRead"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "type": {
+            "const": "search.completed",
+            "default": "search.completed",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "run_id",
+          "query",
+          "sources"
+        ],
+        "title": "SearchCompletedEvent",
+        "type": "object"
+      },
+      "SearchStartedEvent": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "type": {
+            "const": "search.started",
+            "default": "search.started",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "run_id",
+          "query"
+        ],
+        "title": "SearchStartedEvent",
+        "type": "object"
+      },
+      "SourceRead": {
+        "description": "Metadata of a search result. Deliberately no snippet: progress events\ndescribe what was found, they do not carry retrieved page text.",
+        "properties": {
+          "display_url": {
+            "title": "Display Url",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "url",
+          "display_url",
+          "title",
+          "publisher",
+          "published_at"
+        ],
+        "title": "SourceRead",
         "type": "object"
       },
       "TokenResponse": {
@@ -1063,6 +1730,120 @@
         ]
       }
     },
+    "/api/v1/conversations/{conversation_id}/runs": {
+      "post": {
+        "description": "Send a message (or retry the latest one) and stream the answer.",
+        "operationId": "create_run_api_v1_conversations__conversation_id__runs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique per logical request; reuse it when retrying the same request.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Unique per logical request; reuse it when retrying the same request.",
+              "pattern": "^[\\x21-\\x7E]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "agent.status": "#/components/schemas/AgentStatusEvent",
+                      "citation": "#/components/schemas/CitationEvent",
+                      "message.completed": "#/components/schemas/MessageCompletedEvent",
+                      "message.delta": "#/components/schemas/MessageDeltaEvent",
+                      "run.cancelled": "#/components/schemas/RunCancelledEvent",
+                      "run.failed": "#/components/schemas/RunFailedEvent",
+                      "run.started": "#/components/schemas/RunStartedEvent",
+                      "search.completed": "#/components/schemas/SearchCompletedEvent",
+                      "search.started": "#/components/schemas/SearchStartedEvent"
+                    },
+                    "propertyName": "type"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/RunStartedEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AgentStatusEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SearchStartedEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SearchCompletedEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MessageDeltaEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CitationEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MessageCompletedEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RunFailedEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RunCancelledEvent"
+                    }
+                  ],
+                  "type": "string"
+                }
+              }
+            },
+            "description": "A text/event-stream of run events. Each frame's `data` is one of these JSON objects; `sequence` starts at 1 and increases by one. See docs/api.md."
+          },
+          "default": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error envelope returned for every failure."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Run",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
     "/api/v1/health/live": {
       "get": {
         "operationId": "live_api_v1_health_live_get",
@@ -1132,6 +1913,104 @@
         "summary": "Ready",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}": {
+      "get": {
+        "description": "A run's current state; the recovery path when a stream is lost.",
+        "operationId": "get_run_api_v1_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error envelope returned for every failure."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Run",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/cancel": {
+      "post": {
+        "description": "Stop a run. Safe to repeat; a finished run is returned unchanged.",
+        "operationId": "cancel_run_api_v1_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error envelope returned for every failure."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Run",
+        "tags": [
+          "runs"
         ]
       }
     },

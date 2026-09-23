@@ -12,12 +12,15 @@ well-formed result.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
-from app.agent.citations import extract_citations, is_degraded
+from app.agent.citations import CitationStreamFilter, extract_citations, is_degraded
 from app.agent.context import AgentContext
+from app.agent.events import AgentEvent, CitationAdded, StatusChanged, TextDelta
 from app.agent.prompts import (
     ANSWER_DIRECT_SYSTEM,
     SEARCH_DECISION_SYSTEM,
@@ -25,7 +28,7 @@ from app.agent.prompts import (
     render_sources_block,
 )
 from app.agent.routing import SearchDecision, heuristic_search_decision
-from app.agent.state import AgentState, RunError, trim_history
+from app.agent.state import AgentState, Citation, RunError, Source, trim_history
 from app.agent.tools.search import execute_searches, validate_queries
 from app.providers.llm import LLMError, LLMTransientError
 
@@ -56,8 +59,61 @@ def _llm_error(exc: LLMError) -> RunError:
     )
 
 
+def _emit(runtime: Runtime[AgentContext], event: AgentEvent) -> None:
+    """Report progress. A no-op unless the caller is streaming custom events,
+    so a plain ``ainvoke`` in a test pays nothing for it."""
+    runtime.stream_writer(event)
+
+
+@dataclass(frozen=True, slots=True)
+class _StreamedAnswer:
+    raw_text: str
+    prompt_tokens: int | None
+    completion_tokens: int | None
+
+
+async def _stream_answer(
+    runtime: Runtime[AgentContext],
+    prompt: Sequence[AnyMessage],
+    sources: list[Source],
+) -> _StreamedAnswer:
+    """Stream the model's answer to the client as it is written.
+
+    Every fragment passes through the citation filter first, so an invented
+    marker never reaches the screen. The raw text is returned unfiltered: the
+    caller validates it once more, as a whole, to produce the canonical answer
+    that is saved.
+    """
+    citation_filter = CitationStreamFilter(sources)
+    parts: list[str] = []
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+
+    def release(text: str, citations: list[Citation]) -> None:
+        # Citations first: a client that receives "[S1]" in a delta already
+        # knows which source S1 is, so it never renders an unresolvable marker.
+        for citation in citations:
+            _emit(runtime, CitationAdded(citation=citation))
+        if text:
+            _emit(runtime, TextDelta(text=text))
+
+    async for chunk in runtime.context.llm.stream(
+        prompt, max_output_tokens=runtime.context.limits.max_output_tokens
+    ):
+        parts.append(chunk.text)
+        release(*citation_filter.feed(chunk.text))
+        if chunk.prompt_tokens is not None:
+            prompt_tokens = chunk.prompt_tokens
+        if chunk.completion_tokens is not None:
+            completion_tokens = chunk.completion_tokens
+    release(*citation_filter.flush())
+
+    return _StreamedAnswer("".join(parts), prompt_tokens, completion_tokens)
+
+
 async def decide_search(state: AgentState, runtime: Runtime[AgentContext]) -> AgentState:
     """Choose between searching and answering directly."""
+    _emit(runtime, StatusChanged(status="thinking"))
     messages = state.get("messages", [])
     question = _last_user_message(messages)
     heuristic = heuristic_search_decision(question)
@@ -97,10 +153,12 @@ async def decide_search(state: AgentState, runtime: Runtime[AgentContext]) -> Ag
 
 async def web_search(state: AgentState, runtime: Runtime[AgentContext]) -> AgentState:
     """Run the bounded searches and normalize what comes back."""
+    _emit(runtime, StatusChanged(status="searching"))
     outcome = await execute_searches(
         state.get("queries", []),
         provider=runtime.context.search,
         limits=runtime.context.limits,
+        emit=runtime.stream_writer,
     )
 
     update = AgentState(
@@ -129,22 +187,21 @@ async def synthesize(state: AgentState, runtime: Runtime[AgentContext]) -> Agent
         *history,
     ]
 
+    _emit(runtime, StatusChanged(status="writing"))
     try:
-        completion = await runtime.context.llm.complete(
-            prompt, max_output_tokens=runtime.context.limits.max_output_tokens
-        )
+        streamed = await _stream_answer(runtime, prompt, sources)
     except LLMError as exc:
         return AgentState(error=_llm_error(exc))
 
-    answer, citations, discarded = extract_citations(completion.text, sources)
+    answer, citations, discarded = extract_citations(streamed.raw_text, sources)
     degraded = is_degraded(searched=True, answer=answer, citations=citations)
 
     update = AgentState(
         answer=answer,
         citations=citations,
-        model=completion.model,
-        prompt_tokens=completion.prompt_tokens,
-        completion_tokens=completion.completion_tokens,
+        model=runtime.context.llm.model,
+        prompt_tokens=streamed.prompt_tokens,
+        completion_tokens=streamed.completion_tokens,
         degraded=degraded or state.get("degraded", False),
     )
     if degraded:
@@ -161,26 +218,26 @@ async def answer_direct(state: AgentState, runtime: Runtime[AgentContext]) -> Ag
     )
     prompt = [SystemMessage(content=ANSWER_DIRECT_SYSTEM), *history]
 
+    _emit(runtime, StatusChanged(status="writing"))
     try:
-        completion = await runtime.context.llm.complete(
-            prompt, max_output_tokens=runtime.context.limits.max_output_tokens
-        )
+        # No sources exist here, so the filter strips every marker the model
+        # may produce out of habit — on screen as well as in the saved text. A
+        # citation with nothing behind it is the one thing this pipeline must
+        # never render.
+        streamed = await _stream_answer(runtime, prompt, [])
     except LLMError as exc:
         return AgentState(error=_llm_error(exc))
 
-    # No sources exist here, so validation strips every marker the model may
-    # have produced out of habit. A citation with nothing behind it is the one
-    # thing this pipeline must never render.
-    answer, citations, discarded = extract_citations(completion.text, [])
+    answer, citations, discarded = extract_citations(streamed.raw_text, [])
     if discarded:
         logger.warning("uncited_markers_stripped count=%d", len(discarded))
 
     return AgentState(
         answer=answer,
         citations=citations,
-        model=completion.model,
-        prompt_tokens=completion.prompt_tokens,
-        completion_tokens=completion.completion_tokens,
+        model=runtime.context.llm.model,
+        prompt_tokens=streamed.prompt_tokens,
+        completion_tokens=streamed.completion_tokens,
     )
 
 

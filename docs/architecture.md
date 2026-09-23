@@ -180,9 +180,8 @@ failures still get one more attempt.
 
 ## Agent core
 
-The agent is built and tested but not yet reachable over HTTP: Phase 6 adds the
-run endpoint and SSE stream that call it. Design decisions are recorded in
-[ADR-0007](adr/0007-agent-core.md).
+The agent is reached through runs (next section). Design decisions are recorded
+in [ADR-0007](adr/0007-agent-core.md).
 
 ```
 START ─▶ decide_search ─┬─▶ web_search ─┬─▶ synthesize ─┐
@@ -212,9 +211,13 @@ counters, the answer, and terminal error metadata. `AgentContext`
 and the limits; it is passed to `ainvoke(context=…)` and never written to a
 checkpoint.
 
-`run_agent` (`app/agent/graph.py`) is the only entry point. It uses the
-conversation id as the LangGraph `thread_id`, applies the total-run deadline, and
-returns an `AgentResult` — the stable shape callers read instead of raw state.
+`stream_agent` (`app/agent/graph.py`) is the entry point. It takes the
+conversation history, uses the conversation id as the LangGraph `thread_id`,
+and yields progress events (`app/agent/events.py`) followed by exactly one
+`AgentResult` — the stable shape callers read instead of raw state. Nodes emit
+events through LangGraph's custom stream channel; answers are always streamed
+from the model, whether or not anyone is listening, so there is one code path.
+`run_agent` drains the same stream under the run deadline; tests use it.
 
 ### Failure behaviour
 
@@ -231,16 +234,97 @@ returns an `AgentResult` — the stable shape callers read instead of raw state.
 
 ### Checkpoints versus messages
 
-LangGraph's checkpoint tables are created and migrated by the checkpointer
-itself, not by Alembic, and no repository reads them. They are the graph's
-recovery log; `messages` remains the application's history. The checkpointer
-uses its own psycopg pool, separate from the asyncpg engine.
+The `messages` table is the one canonical conversation history. Each run loads
+the latest `MAX_CONTEXT_MESSAGES` turns from it (every user turn; assistant
+turns only when complete, with old citation markers stripped because their
+labels belonged to another run's sources) and hands them to the graph, which
+*replaces* the checkpoint's transcript with them rather than appending. So a
+failed run, a cancelled run, or a retry can never leave the checkpoint holding
+a turn the product does not show — the problem an append-only transcript had.
+
+The checkpoint remains the graph's per-step record for the thread. Its tables
+are created and migrated by the checkpointer itself, not by Alembic, and no
+repository reads them; `alembic/env.py` excludes them from autogenerate, which
+would otherwise propose dropping them. The checkpointer uses its own psycopg
+pool, separate from the asyncpg engine.
 
 ### Testing
 
 Every agent test drives the real compiled graph with deterministic fakes
 (`tests/fakes.py`), so CI needs no provider key. `tests/unit/agent/` covers
 routing, budgets, retries, outages, empty results, invented citations, the run
-deadline, and prompt injection; `tests/integration/test_checkpointer.py` proves
-thread continuity, thread isolation, and that no client or credential reaches a
+deadline, prompt injection, the event sequence, and streaming citation
+validation under arbitrary chunking; `tests/integration/test_checkpointer.py`
+proves the checkpoint mirrors the supplied history (no duplicate turn after a
+retry), thread isolation, and that no client or credential reaches a
 checkpoint.
+
+## Runs and streaming
+
+A run is one execution of the agent for one user message. Design decisions are
+in [ADR-0008](adr/0008-runs-and-streaming.md); the wire protocol is in
+[api.md](api.md#sse-protocol).
+
+```
+POST /conversations/{id}/runs
+  │  RunService.create — one short transaction:
+  │    ownership · idempotency lookup · stale-run sweep ·
+  │    INSERT user message + run (queued) · COMMIT
+  │    (unique-index violation → replay, or 409)
+  ▼
+RunManager.start ──▶ asyncio task ─────────────────────────────┐
+  │                   mark running + load history (short txn)  │
+  │                   stream_agent under the run deadline      │
+  │                   internal events ─▶ numbered SSE events ──┼─▶ queue
+  │                   persist outcome (shielded, one txn)      │
+  ▼                                                            │
+EventStreamResponse ◀── live_events: queue → frames, heartbeats ┘
+      └─ generator torn down early (client gone) ─▶ cancel the task
+```
+
+**Two lifetimes, deliberately separate.** The HTTP response lives as long as the
+connection; the run lives as long as the work. The run executes in its own task
+(`app/services/run_executor.py`) and publishes events to a per-run queue that the
+SSE generator (`app/api/sse.py`) relays. That split gives both halves of the
+contract: a client that disconnects cancels the task, which interrupts the
+model stream immediately; and an answer the model has finished is persisted
+even if the connection is gone, because the final write is shielded from
+cancellation and does not depend on the client.
+
+**The database is the coordinator.** At most one queued/running run per
+conversation is a partial unique index; idempotency is a unique
+`(user_id, idempotency_key)`; every state change is a conditional `UPDATE …
+WHERE status IN ('queued','running')`, so a completing executor, a cancel
+request, and the stale sweep can race and exactly one wins. None of this needs
+Redis or a second replica to be correct; Phase 8 adds Redis for prompt
+cross-replica cancellation and distributed rate limits.
+
+**Short transactions.** Accepting a run, marking it started, and recording its
+outcome are three separate short transactions. No transaction is open while
+the model or search provider is working.
+
+**Sequence numbers** are assigned by the run's task, the only producer on its
+queue, so they are strictly increasing by construction. Internal events become
+wire events in exactly one function (`RunManager._to_public`), so nothing
+reaches a client that the mapping does not explicitly carry.
+
+**Cancellation** is cooperative and has two paths. In-process, the task is
+cancelled — stopping the model call at its next await — and records the
+outcome itself. The cancel endpoint then also marks the run cancelled in the
+database, conditioned on it still being active, which stops a run owned by
+another replica or a dead process: its executor finds the row no longer active
+and discards its result.
+
+**Crash recovery.** A process that dies mid-run leaves a `running` row. No
+healthy run outlives `RUN_TIMEOUT_SECONDS`, so a run older than that plus
+`RUN_STALE_GRACE_SECONDS` is presumed dead and failed as `run_interrupted`
+(retryable) the next time its conversation is used or the run is polled. On a
+clean shutdown the lifespan stops every run before the pool closes, recording
+each as `run_interrupted`.
+
+| Outcome | Run status | Assistant message | Terminal event |
+| --- | --- | --- | --- |
+| Answer produced | `completed` | saved with citations | `message.completed` |
+| Model or search budget failure | `failed` + code | none | `run.failed` |
+| User pressed stop / tab closed / conversation deleted | `cancelled` + reason | none | `run.cancelled` |
+| Server shutdown or crashed process | `failed`, `run_interrupted` | none | `run.failed` |

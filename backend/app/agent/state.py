@@ -46,6 +46,7 @@ class Citation(TypedDict):
     ordinal: int
     source_id: str
     url: str
+    display_url: str
     title: str
     publisher: str | None
     snippet: str

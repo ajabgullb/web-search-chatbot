@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+import subprocess
+import sys
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import Settings
@@ -17,18 +23,63 @@ from app.db.session import Database
 from app.models.message import MessageRole
 from app.repositories.users import UserRepository
 from app.services.conversations import ConversationService
+from tests.conftest import TEST_DATABASE_URL
 from tests.fakes import RecordingEmailSender
 
 REGISTER_PASSWORD = "correct-horse-battery-staple"
 
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+
+
+async def _create_database_if_missing(database_url: str) -> None:
+    """CREATE DATABASE cannot run inside a transaction, hence AUTOCOMMIT, and
+    it cannot target the database it is connected to, hence ``postgres``."""
+    url = make_url(database_url)
+    name = url.database
+    assert name, "TEST_DATABASE_URL must name a database"
+    engine = create_async_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as connection:
+            exists = await connection.scalar(
+                text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": name}
+            )
+            if not exists:
+                # Identifiers cannot be bound parameters; the name comes from
+                # our own configuration, and the quoting handles odd characters.
+                quoted = name.replace('"', '""')
+                await connection.execute(text(f'CREATE DATABASE "{quoted}"'))
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def migrated_test_database() -> None:
+    """Create the test database once per session and bring it to head.
+
+    Migrating through the real Alembic CLI, not ``create_all``, means the
+    schema under test is exactly the one production gets.
+    """
+    asyncio.run(_create_database_if_missing(TEST_DATABASE_URL))
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=BACKEND_DIR,
+        env={**os.environ, "DATABASE_URL": TEST_DATABASE_URL},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.fail(f"alembic upgrade head failed on the test database:\n{result.stderr}")
+
 
 @pytest.fixture(autouse=True)
-async def clean_database(settings: Settings) -> AsyncIterator[None]:
-    """Empty the auth tables around every test.
+async def clean_database(settings: Settings, migrated_test_database: None) -> AsyncIterator[None]:
+    """Empty the application tables around every test.
 
     Truncating rather than wrapping each test in a rollback, because the
     service layer commits — a test must exercise the same commit boundaries
-    the application uses, not a nested transaction that hides them.
+    the application uses, not a nested transaction that hides them. CASCADE
+    reaches every table that references these, runs and citations included.
     """
     engine = create_async_engine(str(settings.database_url))
     statement = text(

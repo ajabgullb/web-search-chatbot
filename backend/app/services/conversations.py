@@ -15,9 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ConversationNotFound, InvalidCursor
 from app.core.pagination import InvalidCursorError, decode_cursor, encode_cursor
+from app.models.citation import Citation
 from app.models.conversation import Conversation
 from app.models.message import Message, MessageRole, MessageStatus
 from app.models.user import User
+from app.repositories.citations import CitationRepository
 from app.repositories.conversations import ConversationRepository
 from app.repositories.messages import MessageRepository
 
@@ -70,6 +72,12 @@ class PageResult[T]:
         return self.next_cursor is not None
 
 
+@dataclass(frozen=True, slots=True)
+class MessageWithCitations:
+    message: Message
+    citations: list[Citation]
+
+
 def _encode_conversation_cursor(conversation: Conversation) -> str:
     return encode_cursor(conversation.updated_at.isoformat(), str(conversation.id))
 
@@ -95,6 +103,7 @@ class ConversationService:
         self._session = session
         self._conversations = ConversationRepository(session)
         self._messages = MessageRepository(session)
+        self._citations = CitationRepository(session)
 
     async def create(self, *, user: User, title: str | None = None) -> Conversation:
         conversation = Conversation(
@@ -149,7 +158,7 @@ class ConversationService:
 
     async def list_messages(
         self, *, user: User, conversation_id: uuid.UUID, limit: int, before: str | None = None
-    ) -> PageResult[Message]:
+    ) -> PageResult[MessageWithCitations]:
         # Resolve the conversation first so an unknown or unowned id fails the
         # same way whether or not it has messages.
         await self.get(user=user, conversation_id=conversation_id)
@@ -170,7 +179,11 @@ class ConversationService:
         # a thread top to bottom, so hand back the page in reading order.
         next_cursor = encode_cursor(str(page[-1].sequence_number)) if overflow and page else None
         page.reverse()
-        return PageResult(items=page, next_cursor=next_cursor)
+        citations = await self._citations.for_messages([message.id for message in page])
+        return PageResult(
+            items=[MessageWithCitations(m, citations.get(m.id, [])) for m in page],
+            next_cursor=next_cursor,
+        )
 
     async def append_message(
         self,
@@ -181,14 +194,31 @@ class ConversationService:
         content: str,
         status: MessageStatus = MessageStatus.complete,
     ) -> Message:
-        """Add a turn and keep the thread's derived title current.
-
-        Phase 6 calls this when a run starts. It lives here rather than in the
-        run service because the title rule belongs to the conversation.
-        """
+        """Add a turn and commit it."""
         conversation = await self.get(user=user, conversation_id=conversation_id)
-        sequence = await self._messages.next_sequence_number(conversation_id=conversation_id)
+        message = await self.stage_message(
+            conversation=conversation, role=role, content=content, status=status
+        )
+        await self._session.commit()
+        await self._session.refresh(message)
+        return message
 
+    async def stage_message(
+        self,
+        *,
+        conversation: Conversation,
+        role: MessageRole,
+        content: str,
+        status: MessageStatus = MessageStatus.complete,
+    ) -> Message:
+        """Add a turn to the session without committing.
+
+        The run service writes the user's message and the run that answers it
+        in one transaction, so a rejected run never leaves an orphaned message
+        behind. It lives here rather than in the run service because the title
+        rule belongs to the conversation.
+        """
+        sequence = await self._messages.next_sequence_number(conversation_id=conversation.id)
         message = Message(
             conversation_id=conversation.id,
             role=role,
@@ -202,7 +232,4 @@ class ConversationService:
         # be silently overwritten by message two.
         if sequence == 1 and role is MessageRole.user and conversation.title == DEFAULT_TITLE:
             conversation.title = derive_title(content)
-
-        await self._session.commit()
-        await self._session.refresh(message)
         return message

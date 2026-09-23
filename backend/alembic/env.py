@@ -29,6 +29,17 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# LangGraph's checkpointer creates and migrates these tables itself. They are
+# not in Base.metadata, so without this filter autogenerate reads them as
+# "removed" and writes a migration that drops them.
+_EXTERNALLY_OWNED_TABLES = frozenset(
+    {"checkpoints", "checkpoint_blobs", "checkpoint_writes", "checkpoint_migrations"}
+)
+
+
+def _include_name(name: str | None, type_: str, parent_names: object) -> bool:
+    return not (type_ == "table" and name in _EXTERNALLY_OWNED_TABLES)
+
 
 def _configure(connection: Connection) -> None:
     context.configure(
@@ -38,6 +49,7 @@ def _configure(connection: Connection) -> None:
         # tables, so autogenerate diffs stay trustworthy.
         compare_type=True,
         compare_server_default=True,
+        include_name=_include_name,
     )
 
 

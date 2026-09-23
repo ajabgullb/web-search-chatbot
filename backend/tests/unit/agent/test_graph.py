@@ -178,7 +178,7 @@ class TestDegradedPaths:
 
 class TestModelFailures:
     async def test_a_model_outage_is_a_retryable_failure(self, run: Run) -> None:
-        llm = FakeLLM(complete_error=LLMTransientError("503"))
+        llm = FakeLLM(answer_error=LLMTransientError("503"))
         result = await run("hello", llm=llm, search=FakeSearchProvider())
 
         assert result.succeeded is False
@@ -187,7 +187,7 @@ class TestModelFailures:
         assert result.error["retryable"] is True
 
     async def test_a_permanent_model_error_is_not_retryable(self, run: Run) -> None:
-        llm = FakeLLM(complete_error=LLMPermanentError("401"))
+        llm = FakeLLM(answer_error=LLMPermanentError("401"))
         result = await run("hello", llm=llm, search=FakeSearchProvider())
 
         assert result.error is not None

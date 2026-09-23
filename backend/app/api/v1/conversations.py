@@ -11,7 +11,7 @@ import uuid
 
 from fastapi import APIRouter, Query, status
 
-from app.api.dependencies import ConversationServiceDep, CurrentUserDep
+from app.api.dependencies import ConversationServiceDep, CurrentUserDep, RunManagerDep
 from app.schemas.conversation import ConversationCreate, ConversationRead, ConversationUpdate
 from app.schemas.message import MessageRead
 from app.schemas.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Page
@@ -72,8 +72,12 @@ async def delete_conversation(
     conversation_id: uuid.UUID,
     current_user: CurrentUserDep,
     service: ConversationServiceDep,
+    manager: RunManagerDep,
 ) -> None:
     await service.delete(user=current_user, conversation_id=conversation_id)
+    # An answer being written into a deleted conversation is work nobody can
+    # ever see; stop it.
+    manager.cancel_conversation(conversation_id, reason="conversation_deleted")
 
 
 @router.get("/{conversation_id}/messages", response_model=Page[MessageRead])
@@ -88,7 +92,7 @@ async def list_messages(
         user=current_user, conversation_id=conversation_id, limit=limit, before=before
     )
     return Page[MessageRead](
-        items=[MessageRead.model_validate(row) for row in page.items],
+        items=[MessageRead.build(row.message, row.citations) for row in page.items],
         next_cursor=page.next_cursor,
         has_more=page.has_more,
     )

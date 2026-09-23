@@ -8,21 +8,24 @@ sources.
 - [`PLAN.md`](./PLAN.md) — the nine-phase roadmap and per-phase definition of done.
 - [`docs/`](./docs) — architecture, API, security, and decision records.
 
-**Current status: Phase 5 (agent core).** You can register, sign in,
-stay signed in across reloads, reset a password from an emailed link, and sign
-out. Inside the app you can create, rename, delete, and page through your own
-conversations, and open one to read its history rendered as sanitized Markdown
-with highlighted code.
+**Current status: Phase 6 (runs, streaming, and cancellation — backend).** You
+can register, sign in, stay signed in across reloads, reset a password from an
+emailed link, and sign out. Inside the app you can create, rename, delete, and
+page through your own conversations and read their history as sanitized
+Markdown with highlighted code.
 
-Behind the scenes the LangGraph agent now exists: it decides whether to search,
-runs bounded Tavily searches, answers with validated citations, and checkpoints
-each conversation thread to PostgreSQL. It is proven entirely through tests
-with fake providers. The composer still **does not reach the model** — the run
-endpoint and SSE stream that connect the two arrive in Phases 6–7.
+The backend now answers: `POST /api/v1/conversations/{id}/runs` streams the
+LangGraph agent's work over Server-Sent Events — status, searches, answer text,
+and validated citations — then saves the answer with its sources. Runs are
+idempotent, limited to one at a time per conversation, cancellable, and
+recoverable through `GET /api/v1/runs/{id}`; see [`docs/api.md`](docs/api.md#runs).
+The chat composer is **not wired to it yet**: incremental rendering in the UI
+arrives in Phase 7.
 
-No provider key is needed to run the app or the tests in development. Set
-`LLM_API_KEY` and `SEARCH_API_KEY` in `.env` once Phase 6 makes the agent
-reachable; production refuses to start without them.
+No provider key is needed to run the app or the tests. To get real answers, set
+`LLM_API_KEY` (and `LLM_BASE_URL`/`LLM_MODEL` for a non-OpenAI endpoint such as
+Ollama) and `SEARCH_API_KEY` in `.env`; production refuses to start without
+them.
 
 ## Stack
 
@@ -82,6 +85,10 @@ plain rebuild will not refresh.
 preflight first, so a stopped database gives you one clear line instead of a
 driver traceback. Run `make check-db` on its own to see where `DATABASE_URL`
 actually points.
+
+Integration tests never touch your development data: they create and migrate
+a sibling database named `<your database>_test` on the same server (`app_test`
+by default) and truncate only that. Set `TEST_DATABASE_URL` to use another.
 
 ```bash
 make help         # list every target

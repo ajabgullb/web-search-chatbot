@@ -12,7 +12,7 @@ retry) or :class:`LLMPermanentError` (retrying only burns quota).
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Protocol, TypeVar
 
@@ -27,11 +27,15 @@ StructuredT = TypeVar("StructuredT", bound=BaseModel)
 
 
 @dataclass(frozen=True, slots=True)
-class LLMCompletion:
-    """What the graph needs from a model call, and nothing more."""
+class LLMChunk:
+    """One fragment of a streamed answer.
+
+    Token usage arrives on whichever chunk the provider attaches it to —
+    usually the last — so it is optional on every chunk rather than returned
+    separately.
+    """
 
     text: str
-    model: str
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
 
@@ -52,9 +56,16 @@ class LLMProvider(Protocol):
     @property
     def model(self) -> str: ...
 
-    async def complete(
+    def stream(
         self, messages: Sequence[AnyMessage], *, max_output_tokens: int | None = None
-    ) -> LLMCompletion: ...
+    ) -> AsyncIterator[LLMChunk]:
+        """Yield the answer as it is generated.
+
+        Answers are always streamed, even when nobody is watching: one code
+        path for the user-facing answer means the thing tested is the thing
+        that ships.
+        """
+        ...
 
     async def structured(
         self, messages: Sequence[AnyMessage], schema: type[StructuredT]
@@ -110,30 +121,33 @@ class OpenAICompatibleLLM:
             temperature=settings.llm_temperature,
             max_tokens=settings.llm_max_output_tokens,
             max_retries=0,  # retries are the graph's decision, not the SDK's
+            # Ask for token usage on the final streamed chunk. Without it a
+            # streamed answer has no usage at all, and cost goes unrecorded.
+            stream_usage=True,
         )
 
     @property
     def model(self) -> str:
         return self._model
 
-    async def complete(
+    async def stream(
         self, messages: Sequence[AnyMessage], *, max_output_tokens: int | None = None
-    ) -> LLMCompletion:
+    ) -> AsyncIterator[LLMChunk]:
         client = self._client
         if max_output_tokens is not None and max_output_tokens != self._max_output_tokens:
             client = client.bind(max_tokens=max_output_tokens)  # type: ignore[assignment]
         try:
-            response = await client.ainvoke(list(messages))
+            async for chunk in client.astream(list(messages)):
+                usage = getattr(chunk, "usage_metadata", None) or {}
+                yield LLMChunk(
+                    text=_text_of(chunk),
+                    prompt_tokens=usage.get("input_tokens"),
+                    completion_tokens=usage.get("output_tokens"),
+                )
         except Exception as exc:  # re-raised as our own type below
+            # A failure mid-stream is classified exactly like one before the
+            # first token: the caller decides what a partial answer is worth.
             raise classify_llm_error(exc) from exc
-
-        usage = getattr(response, "usage_metadata", None) or {}
-        return LLMCompletion(
-            text=_text_of(response),
-            model=self._model,
-            prompt_tokens=usage.get("input_tokens"),
-            completion_tokens=usage.get("output_tokens"),
-        )
 
     async def structured(
         self, messages: Sequence[AnyMessage], schema: type[StructuredT]

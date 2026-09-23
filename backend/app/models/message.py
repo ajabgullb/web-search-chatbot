@@ -6,6 +6,7 @@ import uuid
 from enum import StrEnum
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Enum,
     ForeignKey,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -72,6 +74,15 @@ class Message(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, default=None)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, default=None)
     latency_ms: Mapped[int | None] = mapped_column(Integer, default=None)
+
+    # A searched answer that could not be tied to a source, or an answer given
+    # without search because search failed. ``notice`` is the one sentence the
+    # user is shown about it; both stay on the message so a reload tells the
+    # same story the stream did.
+    degraded: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
+    notice: Mapped[str | None] = mapped_column(Text, default=None)
 
     __table_args__ = (
         # The real guarantee behind message ordering. A concurrent writer that

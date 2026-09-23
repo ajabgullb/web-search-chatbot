@@ -64,7 +64,9 @@ ignore = [
 "alembic/versions/*" = ["E501"]
 # Fixture passwords and signing keys in tests are deliberately fake. The
 # hardcoded-credential rules stay active for everything under app/.
-"tests/*" = ["S105", "S106", "S107"]
+# Polling in tests (ASYNC110) watches state in the database or in a fake
+# provider, which no asyncio.Event can observe.
+"tests/*" = ["S105", "S106", "S107", "ASYNC110"]
 
 [tool.mypy]
 python_version = "3.12"

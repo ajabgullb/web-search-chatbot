@@ -111,6 +111,53 @@ class ConversationNotFound(NotFound):
     message = "Conversation not found."
 
 
+class RunNotFound(NotFound):
+    """Same rule as conversations: someone else's run is indistinguishable
+    from a run that never existed."""
+
+    code = "run_not_found"
+    message = "Run not found."
+
+
+class MessageNotFound(NotFound):
+    code = "message_not_found"
+    message = "Message not found."
+
+
+class RunInProgress(AppError):
+    """A conversation answers one message at a time."""
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "run_in_progress"
+    message = "This conversation is already answering a message."
+
+
+class RetryNotAllowed(AppError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "retry_not_allowed"
+    message = "Only the latest message in a conversation can be retried."
+
+
+class IdempotencyKeyReused(AppError):
+    """The same key with a different request is a client bug, not a retry."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "idempotency_key_reused"
+    message = "This Idempotency-Key was already used for a different request."
+
+
+class MessageEmpty(AppError):
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "message_empty"
+    message = "The message is empty."
+
+
+class MessageTooLong(AppError):
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "message_too_long"
+    message = "The message is too long."
+
+
 class InvalidCursor(AppError):
     status_code = status.HTTP_400_BAD_REQUEST
     code = "invalid_cursor"

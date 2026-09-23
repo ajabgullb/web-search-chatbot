@@ -11,11 +11,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.conversation import Conversation
-from app.models.message import Message, MessageRole
+from app.models.message import Message, MessageRole, MessageStatus
 
 # Roles the public API serializes. System prompts and tool payloads stay
 # internal: exposing them would leak prompt content and raw provider output.
@@ -68,8 +68,8 @@ class MessageRepository:
 
         Read-then-write races here are resolved by the unique constraint on
         (conversation_id, sequence_number): the loser gets an IntegrityError
-        rather than a silently reordered thread. Phase 6 adds the single-active-
-        run lock that stops two writers reaching this point at all.
+        rather than a silently reordered thread. The single-active-run index on
+        ``runs`` stops two writers reaching this point at all.
         """
         result = await self._session.execute(
             select(func.coalesce(func.max(Message.sequence_number), 0)).where(
@@ -77,3 +77,50 @@ class MessageRepository:
             )
         )
         return int(result.scalar_one()) + 1
+
+    async def latest_sequence_number(self, *, conversation_id: uuid.UUID) -> int:
+        return await self.next_sequence_number(conversation_id=conversation_id) - 1
+
+    async def get_owned(
+        self, *, user_id: uuid.UUID, conversation_id: uuid.UUID, message_id: uuid.UUID
+    ) -> Message | None:
+        result = await self._session.execute(
+            select(Message)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Message.id == message_id,
+                Message.conversation_id == conversation_id,
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get(self, message_id: uuid.UUID) -> Message | None:
+        """Unscoped read, for ids taken from an already ownership-checked run."""
+        return await self._session.get(Message, message_id)
+
+    async def history(
+        self, *, conversation_id: uuid.UUID, up_to_sequence: int, limit: int
+    ) -> list[Message]:
+        """The newest ``limit`` turns the model should see, oldest first.
+
+        Every user turn counts — the user did say it, even if no answer came.
+        Assistant turns count only when complete: a failed or cancelled
+        fragment is not something the model should build on.
+        """
+        result = await self._session.execute(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.sequence_number <= up_to_sequence,
+                Message.role.in_(PUBLIC_ROLES),
+                or_(
+                    Message.role == MessageRole.user,
+                    Message.status == MessageStatus.complete,
+                ),
+            )
+            .order_by(Message.sequence_number.desc())
+            .limit(max(limit, 1))
+        )
+        return list(reversed(result.scalars().all()))

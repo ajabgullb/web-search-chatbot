@@ -26,6 +26,7 @@ from app.db.session import Database
 from app.providers.email import build_email_sender
 from app.providers.llm import build_llm_provider
 from app.providers.search import build_search_provider
+from app.services.run_executor import RunManager
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.llm_provider = build_llm_provider(settings)
     app.state.search_provider = build_search_provider(settings)
     app.state.agent_limits = AgentLimits.from_settings(settings)
+    app.state.run_manager = RunManager(app.state.database)
 
     logger.info("application startup: environment=%s", settings.environment)
     async with AsyncExitStack() as stack:
@@ -51,6 +53,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             yield
         finally:
+            # Runs first: each records how it ended, which needs the database
+            # and the checkpointer still open.
+            await app.state.run_manager.shutdown()
             await app.state.search_provider.aclose()
             await app.state.database.dispose()
             logger.info("application shutdown complete")

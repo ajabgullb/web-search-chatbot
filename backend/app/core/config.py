@@ -94,10 +94,19 @@ class Settings(BaseSettings):
     password_max_length: int = 1024
 
     # --- Conversation and agent budgets ---
-    # Enforced server-side when runs land in Phase 6. It exists now because the
-    # composer shows a live counter against it, and a limit the client invents
-    # for itself is a limit that drifts.
+    # Enforced by the run service. The composer shows a live counter against
+    # the same value, so the client never invents a limit of its own.
     max_user_message_chars: int = 16_000
+
+    # --- Streaming ---
+    # A comment line sent while the agent is quiet (waiting on a search, say).
+    # Proxies and load balancers close idle connections, typically after 30-60s;
+    # well under that keeps the stream alive through them.
+    sse_heartbeat_seconds: float = 15.0
+    # How long a run may sit in queued/running before it is presumed dead —
+    # its process crashed or was killed — and stops blocking its conversation.
+    # Must exceed the run deadline, or a healthy run could be declared dead.
+    run_stale_grace_seconds: float = 60.0
 
     # --- LLM provider ---
     # One OpenAI-compatible implementation covers OpenAI, OpenRouter, Groq, and
@@ -138,6 +147,11 @@ class Settings(BaseSettings):
     rate_limit_register: int = 5
     rate_limit_forgot_password: int = 5
     rate_limit_window_seconds: int = 300
+    # Runs are the billable path, so they are limited per *user* rather than
+    # per IP: an authenticated caller behind a shared NAT must not starve
+    # others, and one account must not spend unbounded provider budget.
+    rate_limit_runs: int = 20
+    rate_limit_runs_window_seconds: int = 60
 
     @field_validator("jwt_secret")
     @classmethod

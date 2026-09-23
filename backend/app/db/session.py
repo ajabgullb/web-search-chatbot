@@ -51,6 +51,15 @@ class Database:
                 await session.rollback()
                 raise
 
+    def open_session(self) -> AsyncSession:
+        """A session for work outside a request, used as ``async with``.
+
+        Background run execution has no request-scoped dependency to hand it a
+        session; the context manager closes it deterministically, which breaking
+        out of ``session()``'s generator would not.
+        """
+        return self._sessionmaker()
+
     async def check_connection(self) -> bool:
         """Cheap round-trip used by the readiness probe."""
         try:

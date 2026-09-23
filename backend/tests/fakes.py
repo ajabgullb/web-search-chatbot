@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
 
 from langchain_core.messages import AnyMessage
 
 from app.agent.routing import SearchDecision
 from app.providers.email import EmailPayload
-from app.providers.llm import LLMCompletion, StructuredT
+from app.providers.llm import LLMChunk, StructuredT
 from app.providers.search import SearchHit
 
 
@@ -36,9 +36,14 @@ class RecordingEmailSender:
 class FakeLLM:
     """A scripted language model.
 
-    Deterministic by construction: it returns the next queued answer and records
-    what it was asked. CI must never need a paid API, and a graph test that
-    depends on a real model's wording tests the model, not the graph.
+    Deterministic by construction: it streams the next queued answer in small
+    fixed-size chunks and records what it was asked. CI must never need a paid
+    API, and a graph test that depends on a real model's wording tests the
+    model, not the graph.
+
+    Chunks are deliberately tiny (``chunk_size`` characters) so that citation
+    markers and multi-byte characters are split across chunk boundaries the way
+    a real token stream splits them.
     """
 
     def __init__(
@@ -46,10 +51,13 @@ class FakeLLM:
         *,
         answers: list[str] | None = None,
         decision: SearchDecision | None = None,
-        complete_error: Exception | None = None,
+        answer_error: Exception | None = None,
+        fail_after_chunks: int | None = None,
         structured_error: Exception | None = None,
         model: str = "fake-model",
         delay_seconds: float = 0.0,
+        chunk_size: int = 4,
+        chunk_delay_seconds: float = 0.0,
     ) -> None:
         self._answers = list(answers or ["A fake answer."])
         # Defaults to "do not search" so a test that only cares about the
@@ -57,12 +65,22 @@ class FakeLLM:
         self._decision = decision or SearchDecision(
             should_search=False, rationale="fake default", queries=[]
         )
-        self._complete_error = complete_error
+        self._answer_error = answer_error
+        # With answer_error set: None fails before the first chunk, an integer
+        # fails after that many chunks — the mid-stream outage.
+        self._fail_after_chunks = fail_after_chunks
         self._structured_error = structured_error
         self._model = model
         self._delay_seconds = delay_seconds
-        self.complete_calls: list[list[AnyMessage]] = []
+        self._chunk_size = chunk_size
+        self._chunk_delay_seconds = chunk_delay_seconds
+        self.calls: list[list[AnyMessage]] = []
         self.structured_calls: list[list[AnyMessage]] = []
+        self.chunks_sent = 0
+        self.finished_streams = 0
+        # Set when a stream is cancelled mid-flight: the proof that stopping a
+        # run really stopped the (billable) generation, not just the display.
+        self.cancelled = False
 
     @property
     def model(self) -> str:
@@ -70,20 +88,37 @@ class FakeLLM:
 
     @property
     def last_prompt_text(self) -> str:
-        """Every message of the most recent completion, flattened."""
-        assert self.complete_calls, "the model was never called"
-        return "\n".join(str(message.content) for message in self.complete_calls[-1])
+        """Every message of the most recent answer prompt, flattened."""
+        assert self.calls, "the model was never called"
+        return "\n".join(str(message.content) for message in self.calls[-1])
 
-    async def complete(
+    async def stream(
         self, messages: Sequence[AnyMessage], *, max_output_tokens: int | None = None
-    ) -> LLMCompletion:
-        self.complete_calls.append(list(messages))
-        if self._delay_seconds:
-            await asyncio.sleep(self._delay_seconds)
-        if self._complete_error is not None:
-            raise self._complete_error
+    ) -> AsyncIterator[LLMChunk]:
+        self.calls.append(list(messages))
         text = self._answers.pop(0) if self._answers else "A fake answer."
-        return LLMCompletion(text=text, model=self._model, prompt_tokens=11, completion_tokens=7)
+        pieces = [text[i : i + self._chunk_size] for i in range(0, len(text), self._chunk_size)]
+        try:
+            if self._delay_seconds:
+                await asyncio.sleep(self._delay_seconds)
+            if self._answer_error is not None and self._fail_after_chunks is None:
+                raise self._answer_error
+            for index, piece in enumerate(pieces):
+                if self._answer_error is not None and index == self._fail_after_chunks:
+                    raise self._answer_error
+                if self._chunk_delay_seconds:
+                    await asyncio.sleep(self._chunk_delay_seconds)
+                self.chunks_sent += 1
+                last = index == len(pieces) - 1
+                yield LLMChunk(
+                    text=piece,
+                    prompt_tokens=11 if last else None,
+                    completion_tokens=7 if last else None,
+                )
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        self.finished_streams += 1
 
     async def structured(
         self, messages: Sequence[AnyMessage], schema: type[StructuredT]

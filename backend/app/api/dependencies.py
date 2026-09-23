@@ -29,6 +29,8 @@ from app.providers.email import EmailSender
 from app.repositories.users import UserRepository
 from app.services.auth import AuthService, ClientContext
 from app.services.conversations import ConversationService
+from app.services.run_executor import AgentRuntime, RunManager
+from app.services.runs import RunService
 
 # auto_error=False so a missing header raises our envelope, not FastAPI's.
 _bearer_scheme = HTTPBearer(auto_error=False)
@@ -133,6 +135,52 @@ def get_conversation_service(session: SessionDep) -> ConversationService:
 
 
 ConversationServiceDep = Annotated[ConversationService, Depends(get_conversation_service)]
+
+
+def get_run_service(session: SessionDep, settings: SettingsDep) -> RunService:
+    return RunService(session, settings)
+
+
+RunServiceDep = Annotated[RunService, Depends(get_run_service)]
+
+
+def get_run_manager(request: Request) -> RunManager:
+    manager: RunManager = request.app.state.run_manager
+    return manager
+
+
+RunManagerDep = Annotated[RunManager, Depends(get_run_manager)]
+
+
+def get_agent_runtime(request: Request) -> AgentRuntime:
+    """Resolved per request from app.state, so a test can swap a provider on
+    a running app and the next run uses it."""
+    state = request.app.state
+    return AgentRuntime(
+        graph=state.agent_graph,
+        llm=state.llm_provider,
+        search=state.search_provider,
+        limits=state.agent_limits,
+    )
+
+
+AgentRuntimeDep = Annotated[AgentRuntime, Depends(get_agent_runtime)]
+
+
+def enforce_run_rate_limit(
+    current_user: CurrentUserDep, settings: SettingsDep, limiter: RateLimiterDep
+) -> None:
+    """Per-user limit on starting runs — the path that spends provider money."""
+    decision = limiter.hit(
+        f"runs:{current_user.id}",
+        limit=settings.rate_limit_runs,
+        window_seconds=settings.rate_limit_runs_window_seconds,
+    )
+    if not decision.allowed:
+        raise RateLimited(
+            headers={"Retry-After": str(decision.retry_after_seconds)},
+            details={"retry_after_seconds": decision.retry_after_seconds},
+        )
 
 
 def verify_origin(request: Request, settings: SettingsDep) -> None:
