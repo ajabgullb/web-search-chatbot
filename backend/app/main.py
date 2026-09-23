@@ -44,7 +44,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.llm_provider = build_llm_provider(settings)
     app.state.search_provider = build_search_provider(settings)
     app.state.agent_limits = AgentLimits.from_settings(settings)
-    app.state.run_manager = RunManager(app.state.database)
+    app.state.run_manager = RunManager(
+        app.state.database, abandon_grace_seconds=settings.run_abandon_grace_seconds
+    )
 
     logger.info("application startup: environment=%s", settings.environment)
     async with AsyncExitStack() as stack:

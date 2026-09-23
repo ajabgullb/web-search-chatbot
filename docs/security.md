@@ -146,6 +146,13 @@ pages. See
 
 User messages are rendered as plain text, never parsed as Markdown.
 
+Citations add no new injection path. Markers become buttons in a plugin that
+runs *after* sanitizing, on text the sanitizer already accepted, and are
+skipped inside code and links. Source links are rendered only for absolute
+`http`/`https` URLs, with `target="_blank"` and `rel="noopener noreferrer"`;
+anything else shows its title as text. A test scans the application source and
+fails if `dangerouslySetInnerHTML` is ever set.
+
 ## Agent and untrusted web content
 
 Retrieved web text is hostile input (OWASP LLM01). The controls below bound what
@@ -209,8 +216,10 @@ writes that is not one of our event types is dropped before it can be streamed.
 
 Bounded by: the message length limit (enforced server-side), the output-token
 limit, the run deadline, the per-user run rate limit, and one active run per
-conversation. A disconnected client cancels its run, so an abandoned tab does
-not keep spending.
+conversation. A run whose client disconnects and does not reconnect within
+`RUN_ABANDON_GRACE_SECONDS` (10 s) is cancelled, so an abandoned tab does not
+keep spending; only the run's owner can renew it, because the renewing poll is
+ownership-checked first.
 
 Run endpoints authenticate with the in-memory bearer token, not the refresh
 cookie, so they need no `Origin` check: a cross-site page cannot attach the

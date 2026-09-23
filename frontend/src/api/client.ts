@@ -57,9 +57,12 @@ interface RequestOptions {
   /** Set false on auth endpoints that must not trigger a refresh. */
   retryOnUnauthorized?: boolean
   signal?: AbortSignal
+  /** Extra request headers, such as `Idempotency-Key`. */
+  headers?: Record<string, string>
+  accept?: string
 }
 
-async function readError(response: Response): Promise<ApiError> {
+export async function readError(response: Response): Promise<ApiError> {
   let body: ErrorBody = {
     code: `http_${response.status}`,
     message: 'The request failed.',
@@ -84,7 +87,7 @@ async function readError(response: Response): Promise<ApiError> {
 }
 
 async function send(path: string, options: RequestOptions): Promise<Response> {
-  const headers = new Headers({ Accept: 'application/json' })
+  const headers = new Headers({ ...options.headers, Accept: options.accept ?? 'application/json' })
   if (options.body !== undefined) headers.set('Content-Type', 'application/json')
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
 
@@ -138,10 +141,8 @@ export function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight
 }
 
-/**
- * Perform an API request, transparently refreshing once on a 401.
- */
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+/** Send, and on a 401 refresh once and replay once. Never more. */
+async function sendWithRefresh(path: string, options: RequestOptions): Promise<Response> {
   let response = await send(path, options)
 
   if (response.status === 401 && (options.retryOnUnauthorized ?? true)) {
@@ -153,11 +154,34 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       response = await send(path, options)
     }
   }
+  return response
+}
+
+/**
+ * Perform an API request, transparently refreshing once on a 401.
+ */
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const response = await sendWithRefresh(path, options)
 
   if (!response.ok) throw await readError(response)
   if (response.status === 204) return undefined as T
 
   return (await response.json()) as T
+}
+
+/**
+ * Open a streaming response, under the same refresh-once rule as `request`.
+ *
+ * Returns the `Response` with its body unread; the caller consumes the
+ * stream. Errors before the stream starts (validation, 404, 409, 429) arrive
+ * as ordinary JSON envelopes and are thrown as `ApiError`, exactly as for any
+ * other call. Replaying after a refresh is safe for runs because the replay
+ * carries the same `Idempotency-Key`.
+ */
+export async function openStream(path: string, options: RequestOptions = {}): Promise<Response> {
+  const response = await sendWithRefresh(path, { accept: 'text/event-stream', ...options })
+  if (!response.ok) throw await readError(response)
+  return response
 }
 
 /** Discard the in-memory session. Does not call the server. */

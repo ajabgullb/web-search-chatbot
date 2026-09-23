@@ -178,6 +178,50 @@ TanStack Query retries are narrow: a 4xx is the server saying the request itself
 is wrong, and repeating it only delays the error the user needs to see. Transient
 failures still get one more attempt.
 
+### Streaming frontend
+
+Decisions are in [ADR-0009](adr/0009-streaming-frontend.md).
+
+| Piece | Responsibility |
+| --- | --- |
+| `src/api/stream.ts` | Reads the SSE body with `fetch` (EventSource cannot POST or send a bearer token). A spec-following parser: `TextDecoder` in streaming mode keeps multi-byte characters intact across chunks; a line buffer handles events, lines, and CRLF split anywhere. |
+| `src/api/client.ts` `openStream` | The same single-flight refresh-once rule as every request; replaying after a 401 is safe because it carries the same `Idempotency-Key`. |
+| `features/chat/runStore.ts` | One live run per conversation, in a plain class outside React so an answer keeps streaming while the user switches threads. The only place stream events change state. |
+| `features/chat/cache.ts` | Merges server-confirmed messages into the TanStack Query history, by id and sequence number. |
+| `LiveTurn`, `MessageList`, `SourceList`, `Markdown` | The optimistic question, the streaming answer, inline citation buttons, and source cards. |
+
+**Reconciliation.** The question is shown the moment it is sent. `run.started`
+puts the stored question (with its server id) into the cache and drops the
+optimistic copy; `message.completed` puts the canonical answer into the cache
+*and* clears the streamed text in the same synchronous update, so the thread
+never shows the answer twice or not at all.
+
+**Stop** calls `POST /runs/{id}/cancel` — the server stops the model — and the
+stream then ends with `run.cancelled`. Before the run has an id, stopping
+aborts the request instead. **Retry** after a failed or stopped answer sends
+`retry_message_id` under a new key; retrying a send that never arrived repeats
+the same request under the *same* key, so the server replays it if the first
+attempt did land.
+
+**Recovery.** A dropped stream, or a page loaded while
+`GET /conversations/{id}` reports an `active_run_id`, switches the run to
+polling `GET /runs/{id}` — which also renews its lease — until it ends. A last
+question with no answer and no active run offers a retry.
+
+**Scrolling** follows the answer only while the reader is within 120 px of the
+bottom. "Following" is decided by scroll events — which only the reader (or our
+own scroll-to-bottom) produce — never by measuring after a render, so a large
+chunk of text cannot flip it. A `ResizeObserver` catches growth that happens in
+deferred renders and when the lazy Markdown chunk replaces its plain-text
+fallback.
+
+**Accessibility.** One `aria-live="polite"` region announces each phase change
+(thinking, searching, writing, complete, stopped, failed) — never the tokens.
+The streaming answer is `aria-busy`. Citation buttons are named "Source N:
+title" and move focus to their source card. The composer stays editable while
+an answer streams, so a keyboard user's focus is never thrown out; only
+sending is blocked, and the send button becomes Stop.
+
 ## Agent core
 
 The agent is reached through runs (next section). Design decisions are recorded
@@ -286,10 +330,17 @@ EventStreamResponse ◀── live_events: queue → frames, heartbeats ┘
 connection; the run lives as long as the work. The run executes in its own task
 (`app/services/run_executor.py`) and publishes events to a per-run queue that the
 SSE generator (`app/api/sse.py`) relays. That split gives both halves of the
-contract: a client that disconnects cancels the task, which interrupts the
-model stream immediately; and an answer the model has finished is persisted
-even if the connection is gone, because the final write is shielded from
-cancellation and does not depend on the client.
+contract: a run nobody is watching is cancelled, which interrupts the model
+stream; and an answer the model has finished is persisted even if the
+connection is gone, because the final write is shielded from cancellation and
+does not depend on the client.
+
+**Watching is a lease, not a connection.** A page reload drops the stream and
+reconnects a second later by polling `GET /runs/{id}`. So a dropped stream
+does not cancel the run at once: it starts a `RUN_ABANDON_GRACE_SECONDS` lease
+(default 10 s), each poll from the owner renews it, and only a run nobody
+renews is cancelled as `client_disconnected`. See
+[ADR-0009](adr/0009-streaming-frontend.md).
 
 **The database is the coordinator.** At most one queued/running run per
 conversation is a partial unique index; idempotency is a unique

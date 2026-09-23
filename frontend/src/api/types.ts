@@ -20,8 +20,29 @@ export type MessageResponse = Schemas['MessageResponse']
 export type ErrorBody = Schemas['ErrorBody']
 
 export type Conversation = Schemas['ConversationRead']
+export type ConversationDetail = Schemas['ConversationDetail']
 export type ConversationCreate = Schemas['ConversationCreate']
 export type ConversationUpdate = Schemas['ConversationUpdate']
 export type ChatMessage = Schemas['MessageRead']
 export type ConversationPage = Schemas['Page_ConversationRead_']
 export type MessagePage = Schemas['Page_MessageRead_']
+
+export type Citation = Schemas['CitationRead']
+export type Source = Schemas['SourceRead']
+export type Run = Schemas['RunRead']
+export type RunError = Schemas['RunErrorRead']
+export type RunCreate = Schemas['RunCreate']
+
+/** Every event the run stream can carry, discriminated on `type`. */
+export type RunEvent =
+  | Schemas['RunStartedEvent']
+  | Schemas['AgentStatusEvent']
+  | Schemas['SearchStartedEvent']
+  | Schemas['SearchCompletedEvent']
+  | Schemas['MessageDeltaEvent']
+  | Schemas['CitationEvent']
+  | Schemas['MessageCompletedEvent']
+  | Schemas['RunFailedEvent']
+  | Schemas['RunCancelledEvent']
+
+export type AgentStatus = Schemas['AgentStatusEvent']['status']

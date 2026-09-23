@@ -8,19 +8,14 @@ sources.
 - [`PLAN.md`](./PLAN.md) — the nine-phase roadmap and per-phase definition of done.
 - [`docs/`](./docs) — architecture, API, security, and decision records.
 
-**Current status: Phase 6 (runs, streaming, and cancellation — backend).** You
-can register, sign in, stay signed in across reloads, reset a password from an
-emailed link, and sign out. Inside the app you can create, rename, delete, and
-page through your own conversations and read their history as sanitized
-Markdown with highlighted code.
-
-The backend now answers: `POST /api/v1/conversations/{id}/runs` streams the
-LangGraph agent's work over Server-Sent Events — status, searches, answer text,
-and validated citations — then saves the answer with its sources. Runs are
-idempotent, limited to one at a time per conversation, cancellable, and
-recoverable through `GET /api/v1/runs/{id}`; see [`docs/api.md`](docs/api.md#runs).
-The chat composer is **not wired to it yet**: incremental rendering in the UI
-arrives in Phase 7.
+**Current status: Phase 7 (streaming frontend).** You can register, sign in,
+stay signed in across reloads, reset a password, and manage your conversations.
+Asking a question now streams the answer into the thread as it is written —
+with live search progress, inline citation buttons, and source cards — then
+replaces it with the saved message. You can stop an answer (the server stops
+too), retry a failed or stopped one without duplicating the question, and
+reload mid-answer: the page reconnects and shows the result. See
+[`docs/architecture.md`](docs/architecture.md#streaming-frontend).
 
 No provider key is needed to run the app or the tests. To get real answers, set
 `LLM_API_KEY` (and `LLM_BASE_URL`/`LLM_MODEL` for a non-OpenAI endpoint such as

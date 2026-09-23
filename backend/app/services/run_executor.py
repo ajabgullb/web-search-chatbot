@@ -8,9 +8,13 @@ guarantees at once:
 - An answer the model has finished is **persisted even if the stream dies**:
   the final write is shielded from cancellation, and nothing in it depends on
   the client still listening.
-- A client that goes away **stops the work**: the SSE generator's teardown
-  cancels the task, which interrupts the in-flight model stream immediately
-  rather than letting it bill tokens nobody will read.
+- A client that goes away **stops the work** — after a short grace period.
+  Nobody watching a run is not the same as nobody *ever* watching it again: a
+  page reload drops the stream and reconnects a second later through the
+  recovery endpoint. So a dropped stream starts an observation lease; each
+  ``GET /runs/{id}`` renews it, and a run nobody renews within
+  ``RUN_ABANDON_GRACE_SECONDS`` is cancelled, which interrupts the in-flight
+  model stream rather than letting it bill tokens nobody will read.
 
 Each run has one producer (its task) and one queue, so sequence numbers are
 assigned in exactly one place and are strictly increasing by construction.
@@ -105,6 +109,10 @@ class RunHandle:
     task: asyncio.Task[None] | None = None
     cancel_reason: str | None = None
     finished: bool = False
+    # When someone last showed interest: the stream dropping, or a poll of the
+    # recovery endpoint. Read only once the stream has gone.
+    last_observed: float = field(default_factory=time.monotonic)
+    abandonment_watch: asyncio.Task[None] | None = None
     _sequence: int = 0
 
     def next_sequence(self) -> int:
@@ -124,9 +132,11 @@ class RunHandle:
 
 
 class RunManager:
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, *, abandon_grace_seconds: float = 10.0) -> None:
         self._database = database
         self._active: dict[uuid.UUID, RunHandle] = {}
+        # Public so a test can shorten it on a running app.
+        self.abandon_grace_seconds = abandon_grace_seconds
 
     # --- control ----------------------------------------------------------
 
@@ -158,6 +168,36 @@ class RunManager:
         handle.cancel_reason = handle.cancel_reason or reason
         handle.task.cancel()
         return handle
+
+    def release(self, run_id: uuid.UUID) -> None:
+        """The run's stream has gone; cancel unless someone reattaches in time.
+
+        Reattaching means polling ``GET /runs/{id}`` — what a reloaded page, or
+        a client whose connection blipped, does next.
+        """
+        handle = self._active.get(run_id)
+        if handle is None or handle.task is None or handle.task.done():
+            return
+        handle.last_observed = time.monotonic()
+        if handle.abandonment_watch is None:
+            handle.abandonment_watch = asyncio.create_task(
+                self._watch_abandonment(handle), name=f"run-{run_id}-lease"
+            )
+
+    def observe(self, run_id: uuid.UUID) -> None:
+        """Someone is still following this run: renew its lease."""
+        handle = self._active.get(run_id)
+        if handle is not None:
+            handle.last_observed = time.monotonic()
+
+    async def _watch_abandonment(self, handle: RunHandle) -> None:
+        while not handle.finished:
+            idle = time.monotonic() - handle.last_observed
+            if idle >= self.abandon_grace_seconds:
+                logger.info("run_abandoned run_id=%s idle_s=%.1f", handle.run_id, idle)
+                self.cancel(handle.run_id, reason="client_disconnected")
+                return
+            await asyncio.sleep(self.abandon_grace_seconds - idle)
 
     def cancel_conversation(self, conversation_id: uuid.UUID, *, reason: str) -> None:
         for handle in list(self._active.values()):
@@ -269,6 +309,8 @@ class RunManager:
         finally:
             handle.close()
             self._active.pop(run.id, None)
+            if handle.abandonment_watch is not None:
+                handle.abandonment_watch.cancel()
 
     async def _drive(
         self,

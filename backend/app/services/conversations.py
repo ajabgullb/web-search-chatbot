@@ -22,6 +22,7 @@ from app.models.user import User
 from app.repositories.citations import CitationRepository
 from app.repositories.conversations import ConversationRepository
 from app.repositories.messages import MessageRepository
+from app.repositories.runs import RunRepository
 
 DEFAULT_TITLE = "New conversation"
 # Shorter than the column so a derived title always fits, and short enough to
@@ -125,6 +126,15 @@ class ConversationService:
             # confirm the id is real, turning the endpoint into an oracle.
             raise ConversationNotFound
         return conversation
+
+    async def active_run_id(self, *, conversation: Conversation) -> uuid.UUID | None:
+        """The conversation's queued or running run, if any.
+
+        Takes a conversation already resolved through ``get``, so ownership has
+        been checked before this is asked.
+        """
+        run = await RunRepository(self._session).get_active(conversation_id=conversation.id)
+        return run.id if run is not None else None
 
     async def list(
         self, *, user: User, limit: int, cursor: str | None = None

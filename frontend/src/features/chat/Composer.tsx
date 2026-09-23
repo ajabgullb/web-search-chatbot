@@ -7,7 +7,7 @@
  * Shift+Enter still work normally.
  */
 
-import { SendHorizonal } from 'lucide-react'
+import { SendHorizonal, Square } from 'lucide-react'
 import { useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 
@@ -17,18 +17,24 @@ import { cn } from '@/lib/utils'
 
 interface ComposerProps {
   onSubmit: (content: string) => void
-  /** True while a run is active: the composer accepts no new message. */
-  busy?: boolean
-  disabledReason?: string
+  /**
+   * True while a run is active. The composer is *limited*, not disabled: the
+   * next message can be drafted, but not sent, and the send button becomes a
+   * stop button. Disabling the textarea would throw a keyboard user's focus
+   * out of the box they are typing in.
+   */
+  running?: boolean
+  onStop?: () => void
+  stopping?: boolean
 }
 
-export function Composer({ onSubmit, busy = false, disabledReason }: ComposerProps) {
+export function Composer({ onSubmit, running = false, onStop, stopping = false }: ComposerProps) {
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const trimmed = value.trim()
   const tooLong = value.length > MAX_MESSAGE_CHARACTERS
-  const canSend = trimmed.length > 0 && !tooLong && !busy
+  const canSend = trimmed.length > 0 && !tooLong && !running
 
   function send() {
     if (!canSend) return
@@ -64,7 +70,6 @@ export function Composer({ onSubmit, busy = false, disabledReason }: ComposerPro
             ref={textareaRef}
             rows={1}
             value={value}
-            disabled={busy}
             onChange={(event) => {
               setValue(event.target.value)
               // Grow with the content up to a ceiling, then scroll.
@@ -73,18 +78,35 @@ export function Composer({ onSubmit, busy = false, disabledReason }: ComposerPro
               element.style.height = `${Math.min(element.scrollHeight, 200)}px`
             }}
             onKeyDown={handleKeyDown}
-            placeholder={busy ? 'Waiting for the answer…' : 'Ask anything…'}
+            placeholder={running ? 'Write your next message…' : 'Ask anything…'}
             aria-describedby="composer-help"
             aria-invalid={tooLong || undefined}
-            className="max-h-50 min-h-9 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none disabled:opacity-60"
+            className="max-h-50 min-h-9 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none"
           />
-          <Button type="submit" size="icon" disabled={!canSend} aria-label="Send message">
-            <SendHorizonal className="size-4" aria-hidden />
-          </Button>
+          {running ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              onClick={onStop}
+              disabled={stopping || !onStop}
+              aria-label={stopping ? 'Stopping' : 'Stop answering'}
+            >
+              <Square className="size-4 fill-current" aria-hidden />
+            </Button>
+          ) : (
+            <Button type="submit" size="icon" disabled={!canSend} aria-label="Send message">
+              <SendHorizonal className="size-4" aria-hidden />
+            </Button>
+          )}
         </div>
 
         <div className="flex items-center justify-between gap-4 text-xs text-muted-foreground">
-          <p id="composer-help">{disabledReason ?? 'Enter to send, Shift+Enter for a new line.'}</p>
+          <p id="composer-help">
+            {running
+              ? 'The assistant is answering. You can draft your next message, or stop the answer.'
+              : 'Enter to send, Shift+Enter for a new line.'}
+          </p>
           {value.length >= COUNTER_VISIBLE_FROM ? (
             <p
               // Announced politely so a screen-reader user learns they are near

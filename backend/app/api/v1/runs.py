@@ -173,7 +173,9 @@ async def create_run(
     )
 
     def client_went_away() -> None:
-        manager.cancel(handle.run_id, reason="client_disconnected")
+        # Not an immediate cancel: a reload reconnects through GET /runs/{id}
+        # within seconds. See RunManager.release.
+        manager.release(handle.run_id)
 
     return EventStreamResponse(
         live_events(
@@ -189,9 +191,17 @@ async def get_run(
     run_id: uuid.UUID,
     current_user: CurrentUserDep,
     service: RunServiceDep,
+    manager: RunManagerDep,
 ) -> RunRead:
-    """A run's current state; the recovery path when a stream is lost."""
-    return _run_read(await service.get(user=current_user, run_id=run_id))
+    """A run's current state; the recovery path when a stream is lost.
+
+    Polling also keeps a run whose stream dropped alive: it is how a reloaded
+    page tells the server someone is still waiting for the answer.
+    """
+    view = await service.get(user=current_user, run_id=run_id)
+    # After the ownership check, so a stranger's poll cannot keep a run alive.
+    manager.observe(view.run.id)
+    return _run_read(view)
 
 
 @router.post("/runs/{run_id}/cancel", response_model=RunRead)

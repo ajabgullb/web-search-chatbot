@@ -29,3 +29,14 @@ class ConversationRead(BaseModel):
     # Bumped by any write to the thread, and the primary sort key of the
     # sidebar listing, so clients can order by it without a second field.
     updated_at: datetime
+
+
+class ConversationDetail(ConversationRead):
+    """A single conversation, with what a freshly loaded page needs to resume.
+
+    ``active_run_id`` is set while a run is queued or running. A browser that
+    reloads mid-answer has lost its stream; this is how it learns there is a
+    run to recover through ``GET /runs/{id}``, from any tab or device.
+    """
+
+    active_run_id: uuid.UUID | None = None

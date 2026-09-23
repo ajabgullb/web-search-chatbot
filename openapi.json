@@ -156,6 +156,50 @@
         "title": "ConversationCreate",
         "type": "object"
       },
+      "ConversationDetail": {
+        "description": "A single conversation, with what a freshly loaded page needs to resume.\n\n``active_run_id`` is set while a run is queued or running. A browser that\nreloads mid-answer has lost its stream; this is how it learns there is a\nrun to recover through ``GET /runs/{id}``, from any tab or device.",
+        "properties": {
+          "active_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Run Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ConversationDetail",
+        "type": "object"
+      },
       "ConversationRead": {
         "properties": {
           "created_at": {
@@ -1570,7 +1614,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConversationRead"
+                  "$ref": "#/components/schemas/ConversationDetail"
                 }
               }
             },
@@ -1918,7 +1962,7 @@
     },
     "/api/v1/runs/{run_id}": {
       "get": {
-        "description": "A run's current state; the recovery path when a stream is lost.",
+        "description": "A run's current state; the recovery path when a stream is lost.\n\nPolling also keeps a run whose stream dropped alive: it is how a reloaded\npage tells the server someone is still waiting for the answer.",
         "operationId": "get_run_api_v1_runs__run_id__get",
         "parameters": [
           {

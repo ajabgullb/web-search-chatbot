@@ -80,10 +80,34 @@ describe('the composer', () => {
     expect(screen.getByText(/16,001 \/ 16,000/)).toBeInTheDocument()
   })
 
-  it('accepts nothing while a run is active', () => {
-    render(<Composer onSubmit={vi.fn()} busy />)
+  it('lets the next message be drafted but not sent while a run is active', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    render(<Composer onSubmit={onSubmit} running onStop={vi.fn()} />)
 
-    expect(screen.getByLabelText(/^message$/i)).toBeDisabled()
-    expect(screen.getByRole('button', { name: /send message/i })).toBeDisabled()
+    const textarea = screen.getByLabelText(/^message$/i)
+    expect(textarea).toBeEnabled()
+    await user.type(textarea, 'next question{Enter}')
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    // Enter did not send, and did not eat the draft either.
+    expect(textarea).toHaveValue('next question')
+    expect(screen.queryByRole('button', { name: /send message/i })).not.toBeInTheDocument()
+  })
+
+  it('offers a stop button while a run is active', async () => {
+    const user = userEvent.setup()
+    const onStop = vi.fn()
+    render(<Composer onSubmit={vi.fn()} running onStop={onStop} />)
+
+    await user.click(screen.getByRole('button', { name: /stop answering/i }))
+
+    expect(onStop).toHaveBeenCalledOnce()
+  })
+
+  it('disables stop once stopping has been requested', () => {
+    render(<Composer onSubmit={vi.fn()} running stopping onStop={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: /stopping/i })).toBeDisabled()
   })
 })

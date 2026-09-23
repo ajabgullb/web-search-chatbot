@@ -12,7 +12,12 @@ import uuid
 from fastapi import APIRouter, Query, status
 
 from app.api.dependencies import ConversationServiceDep, CurrentUserDep, RunManagerDep
-from app.schemas.conversation import ConversationCreate, ConversationRead, ConversationUpdate
+from app.schemas.conversation import (
+    ConversationCreate,
+    ConversationDetail,
+    ConversationRead,
+    ConversationUpdate,
+)
 from app.schemas.message import MessageRead
 from app.schemas.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Page
 
@@ -44,14 +49,16 @@ async def create_conversation(
     return ConversationRead.model_validate(conversation)
 
 
-@router.get("/{conversation_id}", response_model=ConversationRead)
+@router.get("/{conversation_id}", response_model=ConversationDetail)
 async def get_conversation(
     conversation_id: uuid.UUID,
     current_user: CurrentUserDep,
     service: ConversationServiceDep,
-) -> ConversationRead:
+) -> ConversationDetail:
     conversation = await service.get(user=current_user, conversation_id=conversation_id)
-    return ConversationRead.model_validate(conversation)
+    detail = ConversationDetail.model_validate(conversation)
+    detail.active_run_id = await service.active_run_id(conversation=conversation)
+    return detail
 
 
 @router.patch("/{conversation_id}", response_model=ConversationRead)

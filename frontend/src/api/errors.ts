@@ -13,6 +13,13 @@ export type ApiErrorCode =
   | 'conversation_not_found'
   | 'invalid_cursor'
   | 'internal_error'
+  | 'run_not_found'
+  | 'message_not_found'
+  | 'run_in_progress'
+  | 'retry_not_allowed'
+  | 'idempotency_key_reused'
+  | 'message_empty'
+  | 'message_too_long'
 
 /**
  * A failed API call, carrying the server's error envelope.

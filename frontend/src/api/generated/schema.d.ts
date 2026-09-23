@@ -253,6 +253,9 @@ export interface paths {
         /**
          * Get Run
          * @description A run's current state; the recovery path when a stream is lost.
+         *
+         *     Polling also keeps a run whose stream dropped alive: it is how a reloaded
+         *     page tells the server someone is still waiting for the answer.
          */
         get: operations["get_run_api_v1_runs__run_id__get"];
         put?: never;
@@ -375,6 +378,35 @@ export interface components {
         ConversationCreate: {
             /** Title */
             title?: string | null;
+        };
+        /**
+         * ConversationDetail
+         * @description A single conversation, with what a freshly loaded page needs to resume.
+         *
+         *     ``active_run_id`` is set while a run is queued or running. A browser that
+         *     reloads mid-answer has lost its stream; this is how it learns there is a
+         *     run to recover through ``GET /runs/{id}``, from any tab or device.
+         */
+        ConversationDetail: {
+            /** Active Run Id */
+            active_run_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** ConversationRead */
         ConversationRead: {
@@ -1169,7 +1201,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConversationRead"];
+                    "application/json": components["schemas"]["ConversationDetail"];
                 };
             };
             /** @description Error envelope returned for every failure. */

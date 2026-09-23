@@ -243,3 +243,32 @@
 :root[data-theme='dark'] .hljs-class .hljs-title {
   color: oklch(0.8 0.11 200);
 }
+
+/* Inline citation buttons: a compact numbered chip. The <sup> shrinks the
+   text once; the button inherits that rather than shrinking it again, which
+   left the number too small to read or hit. */
+.citation-marker {
+  font-size: 0.72em;
+  line-height: 0;
+  vertical-align: super;
+}
+.citation-button {
+  margin-inline: 0.15em;
+  min-width: 1.5em;
+  border: 1px solid var(--color-border);
+  border-radius: 0.3rem;
+  background: var(--color-muted);
+  padding: 0.05em 0.35em;
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-foreground);
+  cursor: pointer;
+}
+.citation-button:hover {
+  background: var(--color-accent);
+}
+.citation-button:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 1px;
+}

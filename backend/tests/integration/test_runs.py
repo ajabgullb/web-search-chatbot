@@ -95,6 +95,25 @@ async def test_an_in_flight_run_reports_running(app: FastAPI, client: AsyncClien
     assert polled["assistant_message"] is None
 
 
+async def test_the_conversation_names_its_active_run_for_a_reloaded_page(
+    app: FastAPI, client: AsyncClient
+) -> None:
+    await install_providers(app, llm=FakeLLM(answers=["slow"], delay_seconds=0.4))
+    headers = await _user(client)
+    conversation = await create_conversation(client, headers)
+    url = f"/api/v1/conversations/{conversation['id']}"
+
+    assert (await client.get(url, headers=headers)).json()["active_run_id"] is None
+    task = asyncio.create_task(post_run(client, headers, conversation["id"], content="hi"))
+    run = await wait_for_active_run(app, conversation["id"])
+    during = (await client.get(url, headers=headers)).json()
+    await task
+    after = (await client.get(url, headers=headers)).json()
+
+    assert during["active_run_id"] == str(run.id)
+    assert after["active_run_id"] is None
+
+
 # --- cancellation ---------------------------------------------------------------
 
 
@@ -252,6 +271,7 @@ async def test_a_client_that_disconnects_stops_server_side_work(
     llm, _ = await install_providers(
         app, llm=FakeLLM(answers=[LONG_ANSWER], chunk_delay_seconds=0.02)
     )
+    app.state.run_manager.abandon_grace_seconds = 0.2
     headers = await _user(client)
     conversation = await create_conversation(client, headers)
 
@@ -269,6 +289,41 @@ async def test_a_client_that_disconnects_stops_server_side_work(
     assert llm.cancelled, "the model stream was interrupted, not left to finish"
     assert llm.finished_streams == 0
     assert [m.role.value for m in await messages_for(app, conversation["id"])] == ["user"]
+
+
+async def test_a_reloaded_page_that_keeps_polling_keeps_its_answer(
+    app: FastAPI, client: AsyncClient
+) -> None:
+    """A reload drops the stream and reconnects through GET /runs/{id}. The
+    poll renews the run's lease, so the answer finishes instead of being
+    cancelled as abandoned."""
+    llm, _ = await install_providers(
+        app, llm=FakeLLM(answers=["Worth waiting for."], chunk_delay_seconds=0.1)
+    )
+    app.state.run_manager.abandon_grace_seconds = 0.3
+    headers = await _user(client)
+    conversation = await create_conversation(client, headers)
+
+    await _stream_then_disconnect(
+        app,
+        path=f"/api/v1/conversations/{conversation['id']}/runs",
+        headers={**headers, "Idempotency-Key": str(uuid.uuid4())},
+        body={"content": "hi"},
+        after_events=4,
+    )
+    (run,) = await runs_for(app, conversation["id"])
+
+    # The reloaded page polls well inside the grace period, until it is done.
+    async with asyncio.timeout(10):
+        while True:
+            polled = (await client.get(f"/api/v1/runs/{run.id}", headers=headers)).json()
+            if polled["status"] != "running":
+                break
+            await asyncio.sleep(0.1)
+
+    assert polled["status"] == "completed"
+    assert polled["assistant_message"]["content"] == "Worth waiting for."
+    assert not llm.cancelled
 
 
 async def test_an_answer_the_model_finished_survives_a_dropped_stream(

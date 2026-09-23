@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     # its process crashed or was killed — and stops blocking its conversation.
     # Must exceed the run deadline, or a healthy run could be declared dead.
     run_stale_grace_seconds: float = 60.0
+    # How long a run whose stream dropped keeps going while nobody watches.
+    # Long enough for a page reload to reconnect via GET /runs/{id}; short
+    # enough that a closed tab stops spending almost at once.
+    run_abandon_grace_seconds: float = 10.0
 
     # --- LLM provider ---
     # One OpenAI-compatible implementation covers OpenAI, OpenRouter, Groq, and

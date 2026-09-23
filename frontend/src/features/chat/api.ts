@@ -6,7 +6,14 @@
  */
 
 import { request } from '@/api/client'
-import type { Conversation, ConversationPage, ConversationUpdate, MessagePage } from '@/api/types'
+import type {
+  Conversation,
+  ConversationDetail,
+  ConversationPage,
+  ConversationUpdate,
+  MessagePage,
+  Run,
+} from '@/api/types'
 
 export const PAGE_SIZE = 20
 
@@ -23,8 +30,8 @@ export function listConversations(cursor?: string): Promise<ConversationPage> {
   return request<ConversationPage>(`/conversations${query({ cursor, limit: PAGE_SIZE })}`)
 }
 
-export function getConversation(id: string): Promise<Conversation> {
-  return request<Conversation>(`/conversations/${id}`)
+export function getConversation(id: string): Promise<ConversationDetail> {
+  return request<ConversationDetail>(`/conversations/${id}`)
 }
 
 export function createConversation(title?: string): Promise<Conversation> {
@@ -45,4 +52,12 @@ export function deleteConversation(id: string): Promise<void> {
 
 export function listMessages(id: string, before?: string): Promise<MessagePage> {
   return request<MessagePage>(`/conversations/${id}/messages${query({ before, limit: PAGE_SIZE })}`)
+}
+
+export function getRun(runId: string): Promise<Run> {
+  return request<Run>(`/runs/${runId}`)
+}
+
+export function cancelRun(runId: string): Promise<Run> {
+  return request<Run>(`/runs/${runId}/cancel`, { method: 'POST' })
 }

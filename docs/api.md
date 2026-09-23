@@ -87,7 +87,7 @@ that does not exist: both answer `404 conversation_not_found`, never `403`.
 | --- | --- | --- | --- |
 | GET | `/conversations?cursor=&limit=` | Newest-first page of the caller's threads | `200` |
 | POST | `/conversations` | Create a thread (`title` optional) | `201` |
-| GET | `/conversations/{id}` | One thread | `200` |
+| GET | `/conversations/{id}` | One thread, with `active_run_id` | `200` |
 | PATCH | `/conversations/{id}` | Rename | `200` |
 | DELETE | `/conversations/{id}` | Soft delete | `204` |
 | GET | `/conversations/{id}/messages?before=&limit=` | Page of turns, oldest-first within the page | `200` |
@@ -109,6 +109,11 @@ page forward from the newest (`cursor`); messages page *backwards* into history
 (`before`), because a thread is read from the bottom.
 
 `limit` is bounded to 1–100 and defaults to 20.
+
+`GET /conversations/{id}` also returns `active_run_id`: the id of the run
+currently queued or running in the thread, or `null`. A page loaded mid-answer
+has no stream; this is how it finds the run to follow through
+`GET /runs/{run_id}`.
 
 Only `user` and `assistant` turns are serialized. `system` and `tool` rows exist
 in the same table and are never exposed — they would leak prompt text and raw
@@ -219,10 +224,13 @@ citation validation as the saved answer, so they agree on which sources are
 cited, but the saved answer additionally has whitespace tidied where a marker
 was removed. The canonical message is the one that reloads.
 
-**Disconnects and recovery.** Closing the connection cancels the run
-(`client_disconnected`), which stops the model call rather than paying for an
-answer nobody receives. An answer the model had already finished is saved
-regardless. After a lost stream, `GET /runs/{run_id}` returns the run with its
+**Disconnects and recovery.** When the connection closes, the run keeps going
+for `RUN_ABANDON_GRACE_SECONDS` (default 10) while it waits for someone to come
+back. Each `GET /runs/{run_id}` from the owner renews that lease, so a reloaded
+page that polls keeps its answer. A run nobody polls within the grace period is
+cancelled (`client_disconnected`), which stops the model call rather than paying
+for an answer nobody receives. An answer the model had already finished is
+saved regardless. `GET /runs/{run_id}` returns the run with its
 `assistant_message` embedded once complete; the message history shows the same.
 Resumable streams (`Last-Event-ID`) are not supported in v1.
 

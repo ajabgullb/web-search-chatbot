@@ -1,28 +1,45 @@
 /**
- * A single thread: history above, composer below.
+ * A single thread: history above, the live turn below it, composer at the
+ * bottom.
  */
 
-import { useState } from 'react'
+import { useEffect } from 'react'
 import { useParams } from 'react-router'
 
 import { ApiError } from '@/api/errors'
 import { Alert } from '@/components/ui/Alert'
 import { FullPageSpinner } from '@/components/FullPageSpinner'
 import { Composer } from '@/features/chat/Composer'
+import { LiveTurn, UnansweredNotice } from '@/features/chat/LiveTurn'
 import { MessageList } from '@/features/chat/MessageList'
 import { useConversation, useMessages } from '@/features/chat/queries'
+import { isActive } from '@/features/chat/runStore'
+import { useLiveRun, useRunStore } from '@/features/chat/useLiveRun'
 
 export function ConversationPage() {
   const { conversationId } = useParams()
   const conversation = useConversation(conversationId)
   const messages = useMessages(conversationId)
-  const [notice, setNotice] = useState<string | null>(null)
+  const store = useRunStore()
+  const live = useLiveRun(conversationId)
+
+  const activeRunId = conversation.data?.active_run_id ?? null
+
+  // A run the server says is in progress but this tab has no stream for — the
+  // page was reloaded mid-answer, or it was started in another tab. Follow it
+  // through the recovery endpoint. `recover` is idempotent, so StrictMode's
+  // double effect is harmless.
+  useEffect(() => {
+    if (!conversationId || !activeRunId) return
+    const current = store.get(conversationId)
+    if (!current || current.phase === 'completed') store.recover(conversationId, activeRunId)
+  }, [conversationId, activeRunId, store])
 
   if (conversation.isPending) {
     return <FullPageSpinner label="Loading conversation" />
   }
 
-  if (conversation.isError) {
+  if (conversation.isError || !conversationId) {
     const missing =
       conversation.error instanceof ApiError && conversation.error.is('conversation_not_found')
     return (
@@ -36,6 +53,14 @@ export function ConversationPage() {
     )
   }
 
+  const history = messages.data?.items ?? []
+  const last = history.at(-1)
+  const running = isActive(live)
+  // The last question has no answer and nothing is working on it: offer a
+  // retry, unless the live turn already shows one for this very message.
+  const unanswered =
+    last?.role === 'user' && !running && !activeRunId && live?.userMessageId !== last.id
+
   return (
     <main className="flex min-h-0 flex-1 flex-col">
       <div className="border-b border-border px-4 py-3">
@@ -43,32 +68,29 @@ export function ConversationPage() {
       </div>
 
       <MessageList
-        messages={messages.data?.items ?? []}
+        messages={history}
         hasOlder={messages.hasNextPage}
         isLoadingOlder={messages.isFetchingNextPage}
         onLoadOlder={() => void messages.fetchNextPage()}
-      />
+        followKey={`${live?.phase}:${live?.text.length}:${live?.searches.length}:${live?.citations.length}`}
+      >
+        {live ? <LiveTurn run={live} onRetry={() => store.retry(conversationId)} /> : null}
+        {unanswered ? (
+          <UnansweredNotice onRetry={() => store.retry(conversationId, last.id)} />
+        ) : null}
+      </MessageList>
 
-      {/* Status announcements for assistive tech; Phase 7 streams run progress
-          through the same region. */}
+      {/* Progress for assistive tech: one sentence per phase change, never a
+          token-by-token recital of the answer. */}
       <div role="status" aria-live="polite" className="sr-only">
-        {notice}
+        {live?.announcement}
       </div>
-      {notice ? (
-        <div className="mx-auto w-full max-w-3xl px-4">
-          <Alert variant="info" title="Not connected yet">
-            {notice}
-          </Alert>
-        </div>
-      ) : null}
 
       <Composer
-        onSubmit={() =>
-          setNotice(
-            'The agent arrives in the next phase, so this message was not sent. Conversations, history, and the composer are working.',
-          )
-        }
-        disabledReason="Enter to send, Shift+Enter for a new line. Answering arrives with the agent."
+        onSubmit={(content) => store.send(conversationId, content)}
+        running={running}
+        stopping={live?.stopping ?? false}
+        onStop={() => void store.stop(conversationId)}
       />
     </main>
   )
