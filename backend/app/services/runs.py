@@ -7,14 +7,18 @@ whether a run may start at all, and records it. The rules it enforces:
 - **Idempotency** — ``(user, Idempotency-Key)`` is unique. A repeated key with
   the same request returns the original run instead of creating another; with
   a different request it is rejected.
-- **One active run per conversation** — enforced by a partial unique index, so
-  it holds under concurrency no matter how requests interleave.
+- **One active run per conversation** — checked first against the run lock
+  (:mod:`app.core.run_lock`), which turns a conflict away before any database
+  work and coordinates replicas; then enforced by a partial unique index,
+  which holds under concurrency no matter how requests interleave, even if
+  the lock is lost.
 - **Atomic acceptance** — the user message and the run commit together or not
   at all.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -34,8 +38,10 @@ from app.api.errors import (
     RetryNotAllowed,
     RunInProgress,
     RunNotFound,
+    ServiceUnavailable,
 )
 from app.core.config import Settings
+from app.core.run_lock import RunLock, RunLockUnavailable
 from app.models.conversation import Conversation
 from app.models.message import Message, MessageRole
 from app.models.run import Run, RunStatus
@@ -103,9 +109,10 @@ class RunView:
 
 
 class RunService:
-    def __init__(self, session: AsyncSession, settings: Settings) -> None:
+    def __init__(self, session: AsyncSession, settings: Settings, run_lock: RunLock) -> None:
         self._session = session
         self._settings = settings
+        self._run_lock = run_lock
         self._runs = RunRepository(session)
         self._messages = MessageRepository(session)
         self._citations = CitationRepository(session)
@@ -147,8 +154,15 @@ class RunService:
         conversation_key = conversation.id
 
         await self._expire_stale_runs(conversation_key)
+
+        # The run's id is chosen now, before its row exists, so the lock can
+        # be taken in its name and released by whoever ends the run.
+        run_id = uuid.uuid4()
+        await self._take_lock(conversation_key, run_id)
+        committed = False
         try:
             accepted = await self._accept(
+                run_id=run_id,
                 user=user,
                 conversation=conversation,
                 content=content,
@@ -157,16 +171,25 @@ class RunService:
                 fingerprint=fingerprint,
             )
             await self._session.commit()
+            committed = True
         except IntegrityError:
-            # A concurrent request won a race on one of three unique indexes:
-            # the idempotency key (the same request, sent twice at once), the
-            # one-active-run index, or the message sequence. Rolling back
-            # discards our user message as well as our run.
+            # The lock let us through, but a unique index refused: the
+            # idempotency key (the same key sent at once to two conversations,
+            # which hold separate locks), the one-active-run index (the lock
+            # was lost or expired — the database is the source of truth), or
+            # the message sequence. Rolling back discards our user message as
+            # well as our run.
             await self._session.rollback()
             existing = await self._runs.get_by_idempotency_key(user_id=user_id, key=idempotency_key)
             if existing is not None:
                 return await self._replay(existing, fingerprint)
             raise await self._in_progress(conversation_key) from None
+        finally:
+            if not committed:
+                # Every path that did not create the run gives the lock back:
+                # a conflict, a rejected retry, a client that hung up mid-way.
+                # Shielded so a cancelled request still completes the release.
+                await asyncio.shield(self._run_lock.release(conversation_key, run_id))
 
         logger.info(
             "run_accepted run_id=%s conversation_id=%s retry=%s",
@@ -175,6 +198,19 @@ class RunService:
             payload.retry_message_id is not None,
         )
         return accepted
+
+    async def _take_lock(self, conversation_id: uuid.UUID, run_id: uuid.UUID) -> None:
+        try:
+            taken = await self._run_lock.acquire(conversation_id, run_id)
+        except RunLockUnavailable:
+            # Fail closed. The database index would still prevent a second
+            # run, but production is configured to coordinate through Redis,
+            # and silently running without it hides an outage.
+            logger.error("run_lock_unavailable conversation_id=%s", conversation_id)
+            raise ServiceUnavailable from None
+        if not taken:
+            logger.info("run_rejected_locked conversation_id=%s", conversation_id)
+            raise await self._in_progress(conversation_id)
 
     def _check_length(self, content: str) -> None:
         if not content:
@@ -189,6 +225,7 @@ class RunService:
     async def _accept(
         self,
         *,
+        run_id: uuid.UUID,
         user: User,
         conversation: Conversation,
         content: str | None,
@@ -210,6 +247,7 @@ class RunService:
         await self._session.flush()
         run = self._runs.add(
             Run(
+                id=run_id,
                 user_id=user.id,
                 conversation_id=conversation.id,
                 user_message_id=user_message.id,
@@ -265,7 +303,10 @@ class RunService:
 
     async def _in_progress(self, conversation_id: uuid.UUID) -> RunInProgress:
         active = await self._runs.get_active(conversation_id=conversation_id)
-        return RunInProgress(details={"run_id": str(active.id)} if active else None)
+        # A committed run is the better answer. Failing that, the lock names a
+        # run that is being accepted right now, before its row is committed.
+        run_id = active.id if active else await self._run_lock.holder(conversation_id)
+        return RunInProgress(details={"run_id": str(run_id)} if run_id else None)
 
     async def _expire_stale_runs(self, conversation_id: uuid.UUID) -> None:
         now = datetime.now(UTC)
@@ -275,9 +316,13 @@ class RunService:
         expired = await self._runs.expire_stale(
             conversation_id=conversation_id, created_before=threshold, now=now
         )
+        for run_id in expired:
+            # Its lease has normally expired by now too; releasing makes that
+            # true even if replicas disagree on the configured timeouts.
+            await self._run_lock.release(conversation_id, run_id)
         if expired:
             logger.warning(
-                "run_expired_stale conversation_id=%s count=%d", conversation_id, expired
+                "run_expired_stale conversation_id=%s count=%d", conversation_id, len(expired)
             )
 
     # --- read -------------------------------------------------------------
@@ -331,4 +376,9 @@ class RunService:
             completed_at=datetime.now(UTC),
         )
         await self._session.commit()
+        # The executor releases the lock when it ends, but it may be on another
+        # replica and take a while to notice. The run is over as of this
+        # commit, so the conversation is free now. Naming the run makes this a
+        # no-op if the executor got there first and a new run took the lock.
+        await self._run_lock.release(view.run.conversation_id, run_id)
         return await self.get(user=user, run_id=run_id)

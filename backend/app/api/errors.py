@@ -94,6 +94,14 @@ class RateLimited(AppError):
     message = "Too many requests. Try again shortly."
 
 
+class ServiceUnavailable(AppError):
+    """A dependency the request needs is down. Retryable by definition."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "service_unavailable"
+    message = "The service is temporarily unavailable. Try again shortly."
+
+
 class NotFound(AppError):
     status_code = status.HTTP_404_NOT_FOUND
     code = "not_found"

@@ -55,6 +55,9 @@ def settings() -> Settings:
         # Empty host selects the logging sender, so no test needs an SMTP
         # server; the recording double replaces it where the body matters.
         smtp_host="",
+        # In-process coordination unless a test opts into Redis, so no test
+        # depends on a Redis the developer happens to have running.
+        redis_url="",
     )
 
 

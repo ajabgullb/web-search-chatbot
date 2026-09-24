@@ -73,7 +73,7 @@ class RunRepository:
 
     async def expire_stale(
         self, *, conversation_id: uuid.UUID, created_before: datetime, now: datetime
-    ) -> int:
+    ) -> list[uuid.UUID]:
         """Fail active runs too old to still be alive.
 
         A process that crashes mid-run leaves its row ``running`` forever, and
@@ -96,7 +96,7 @@ class RunRepository:
             )
             .returning(Run.id)
         )
-        return len(result.all())
+        return list(result.scalars().all())
 
     async def mark_running(self, *, run_id: uuid.UUID, now: datetime) -> bool:
         result = await self._session.execute(

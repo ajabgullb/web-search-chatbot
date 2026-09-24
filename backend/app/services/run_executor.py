@@ -47,6 +47,7 @@ from app.agent.events import (
     TextDelta,
 )
 from app.agent.graph import INTERNAL_ERROR, RUN_TIMEOUT_ERROR, AgentGraph, AgentResult, stream_agent
+from app.core.run_lock import RunLock
 from app.db.session import Database
 from app.models.citation import Citation
 from app.models.message import Message, MessageRole, MessageStatus
@@ -132,8 +133,11 @@ class RunHandle:
 
 
 class RunManager:
-    def __init__(self, database: Database, *, abandon_grace_seconds: float = 10.0) -> None:
+    def __init__(
+        self, database: Database, run_lock: RunLock, *, abandon_grace_seconds: float = 10.0
+    ) -> None:
         self._database = database
+        self._run_lock = run_lock
         self._active: dict[uuid.UUID, RunHandle] = {}
         # Public so a test can shorten it on a running app.
         self.abandon_grace_seconds = abandon_grace_seconds
@@ -311,6 +315,10 @@ class RunManager:
             self._active.pop(run.id, None)
             if handle.abandonment_watch is not None:
                 handle.abandonment_watch.cancel()
+            # Last, after the outcome is in the database: releasing earlier
+            # would let the next run start while this one could still write.
+            # Shielded because this also runs while the task is being cancelled.
+            await asyncio.shield(self._run_lock.release(run.conversation_id, run.id))
 
     async def _drive(
         self,

@@ -40,10 +40,11 @@ Liveness. Always `200` while the process is running.
 ### `GET /api/v1/health/ready`
 
 Readiness. `200` when every required dependency answers, otherwise `503` with
-the same body shape.
+the same body shape. `redis` appears only when `REDIS_URL` is configured
+(always in production).
 
 ```json
-{ "status": "ready", "checks": { "database": true } }
+{ "status": "ready", "checks": { "database": true, "redis": true } }
 ```
 
 ## Authentication
@@ -178,7 +179,11 @@ unique per logical request, and reused when retrying the same request.
 
 Keys are scoped per user. A conversation answers one message at a time: a
 submission while another run is active returns `409 run_in_progress` with the
-active `details.run_id`, and leaves nothing behind. Runs are rate-limited per
+active `details.run_id`, and leaves nothing behind. The run lock usually refuses
+it before any database work; `details.run_id` can then name a run whose
+acceptance has not committed yet, so a poll of it may briefly return `404`. If
+the lock backend (Redis) is unreachable, run creation returns
+`503 service_unavailable`; retry shortly. Runs are rate-limited per
 user (`RATE_LIMIT_RUNS` per `RATE_LIMIT_RUNS_WINDOW_SECONDS`, default 20/min).
 
 Validation, ownership, idempotency, and conflict failures are ordinary JSON
@@ -277,4 +282,5 @@ is set only when `failed`; `cancel_reason` only when `cancelled`.
 | `message_empty` | 422 | The message is blank after trimming |
 | `message_too_long` | 422 | Over `MAX_USER_MESSAGE_CHARS`; `details` has the limit and length |
 | `invalid_cursor` | 400 | Pagination cursor was not produced by this API |
+| `service_unavailable` | 503 | A required dependency (Redis, for run creation) is down; retry shortly |
 | `internal_error` | 500 | Unexpected failure; quote `request_id` |

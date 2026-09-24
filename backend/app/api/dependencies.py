@@ -12,6 +12,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 from fastapi.params import Depends as DependsMarker
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import (
@@ -22,6 +23,7 @@ from app.api.errors import (
 )
 from app.core.config import Settings
 from app.core.rate_limit import RateLimiter
+from app.core.run_lock import RunLock
 from app.core.security import TokenError, decode_access_token
 from app.db.session import Database
 from app.models.user import User
@@ -53,6 +55,12 @@ def get_database(request: Request) -> Database:
     return database
 
 
+def get_redis(request: Request) -> Redis | None:
+    """The shared Redis client, or None when Redis is not configured."""
+    redis: Redis | None = request.app.state.redis
+    return redis
+
+
 def get_email_sender(request: Request) -> EmailSender:
     sender: EmailSender = request.app.state.email_sender
     return sender
@@ -72,6 +80,7 @@ async def get_session(
 
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 DatabaseDep = Annotated[Database, Depends(get_database)]
+RedisDep = Annotated[Redis | None, Depends(get_redis)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 EmailSenderDep = Annotated[EmailSender, Depends(get_email_sender)]
 RateLimiterDep = Annotated[RateLimiter, Depends(get_rate_limiter)]
@@ -137,8 +146,16 @@ def get_conversation_service(session: SessionDep) -> ConversationService:
 ConversationServiceDep = Annotated[ConversationService, Depends(get_conversation_service)]
 
 
-def get_run_service(session: SessionDep, settings: SettingsDep) -> RunService:
-    return RunService(session, settings)
+def get_run_lock(request: Request) -> RunLock:
+    run_lock: RunLock = request.app.state.run_lock
+    return run_lock
+
+
+RunLockDep = Annotated[RunLock, Depends(get_run_lock)]
+
+
+def get_run_service(session: SessionDep, settings: SettingsDep, run_lock: RunLockDep) -> RunService:
+    return RunService(session, settings, run_lock)
 
 
 RunServiceDep = Annotated[RunService, Depends(get_run_service)]

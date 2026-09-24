@@ -37,6 +37,7 @@ def production_settings(**overrides: object) -> Settings:
         "frontend_origin": "https://app.example.com",
         "llm_api_key": "sk-not-a-real-key",
         "search_api_key": "tvly-not-a-real-key",
+        "redis_url": "redis://redis:6379/0",
     }
     values.update(overrides)
     return Settings(**values)  # type: ignore[arg-type]
@@ -60,6 +61,23 @@ def test_production_requires_provider_credentials() -> None:
         production_settings(llm_api_key="")
     with pytest.raises(ValidationError, match="SEARCH_API_KEY"):
         production_settings(search_api_key="")
+
+
+def test_production_requires_redis() -> None:
+    """Without it every replica would lock and rate-limit only against itself."""
+    with pytest.raises(ValidationError, match="REDIS_URL"):
+        production_settings(redis_url="")
+
+
+def test_development_does_not_require_redis() -> None:
+    assert Settings(environment=Environment.development, redis_url="").redis_url == ""
+
+
+def test_run_lock_outlives_the_run_deadline() -> None:
+    """A lease shorter than a run could expire mid-run and admit a second one."""
+    settings = Settings(run_timeout_seconds=90, run_stale_grace_seconds=60)
+    assert settings.run_lock_lease_seconds == 150
+    assert settings.run_lock_lease_seconds > settings.run_timeout_seconds
 
 
 def test_development_does_not_require_provider_credentials() -> None:

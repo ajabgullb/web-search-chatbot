@@ -21,6 +21,20 @@ services:
       retries: 10
       start_period: 10s
 
+  redis:
+    # Run locks now; rate limits and cancellation signals later in Phase 8.
+    # Nothing here needs to survive a restart (locks are leases that expire,
+    # and the database still guards correctness), so persistence is off.
+    image: redis:7-alpine
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    ports:
+      - '${REDIS_HOST_PORT:-6379}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   mailpit:
     # Catches every outbound email in development; UI on http://localhost:8025.
     image: axllent/mailpit:latest
@@ -42,6 +56,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
+      REDIS_URL: redis://redis:6379/0
     # Single dev replica, so migrating here is safe. Production runs migrations
     # as an explicit release job instead (AGENTS.md §14).
     command: >
@@ -55,6 +70,8 @@ services:
       - /app/.venv
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       mailpit:
         condition: service_started

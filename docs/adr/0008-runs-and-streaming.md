@@ -6,7 +6,9 @@ Date: 2026-09-23
 
 Accepted. Disconnect handling amended by
 [ADR-0009](0009-streaming-frontend.md): a dropped stream starts a short
-observation lease instead of cancelling at once.
+observation lease instead of cancelling at once. Extended by
+[ADR-0010](0010-redis-run-lock.md): an application-level run lock now sits in
+front of the one-active-run index, which remains the source of truth.
 
 ## Context
 

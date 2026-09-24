@@ -15,7 +15,7 @@ browser ──▶ frontend (Vite/React, nginx in production)
            backend (FastAPI, async)
                 │
                 ├── PostgreSQL   application data + LangGraph checkpoints
-                ├── Redis        rate limits, run locks, cancel flags (Phase 8)
+                ├── Redis        run locks; rate limits, cancel flags (Phase 8)
                 ├── LLM provider  behind app/providers/llm.py
                 └── Search        behind app/providers/search.py
 ```
@@ -347,8 +347,17 @@ conversation is a partial unique index; idempotency is a unique
 `(user_id, idempotency_key)`; every state change is a conditional `UPDATE …
 WHERE status IN ('queued','running')`, so a completing executor, a cancel
 request, and the stale sweep can race and exactly one wins. None of this needs
-Redis or a second replica to be correct; Phase 8 adds Redis for prompt
-cross-replica cancellation and distributed rate limits.
+Redis or a second replica to be correct.
+
+**A run lock sits in front of it.** Before accepting a run, the service takes
+a per-conversation lease (`app/core/run_lock.py`) in Redis, or in process
+memory when `REDIS_URL` is empty. The lease is named by the run's id and
+expires after the run deadline plus the stale grace period. It turns a
+conflicting submission away before any database work, and a cancel on any
+replica frees it at once. The executor releases it after recording the
+outcome. If the lock is lost, the index still refuses the second run. A Redis
+outage fails run creation with `503`. See
+[ADR-0010](adr/0010-redis-run-lock.md).
 
 **Short transactions.** Accepting a run, marking it started, and recording its
 outcome are three separate short transactions. No transaction is open while

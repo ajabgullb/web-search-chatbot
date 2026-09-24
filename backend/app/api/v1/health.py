@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Response, status
 
-from app.api.dependencies import DatabaseDep
+from app.api.dependencies import DatabaseDep, RedisDep
+from app.core.redis import ping
 from app.schemas.health import LivenessResponse, ReadinessResponse
 
 router = APIRouter(prefix="/health", tags=["health"])
@@ -26,8 +27,12 @@ async def live() -> LivenessResponse:
     response_model=ReadinessResponse,
     responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ReadinessResponse}},
 )
-async def ready(database: DatabaseDep, response: Response) -> ReadinessResponse:
+async def ready(database: DatabaseDep, redis: RedisDep, response: Response) -> ReadinessResponse:
     checks = {"database": await database.check_connection()}
+    # Only when configured: in development Redis is optional, and an absent
+    # optional dependency is not a reason to refuse traffic.
+    if redis is not None:
+        checks["redis"] = await ping(redis)
     is_ready = all(checks.values())
     if not is_ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

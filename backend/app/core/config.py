@@ -93,6 +93,14 @@ class Settings(BaseSettings):
     # the ceiling only bounds the work an unauthenticated caller can demand.
     password_max_length: int = 1024
 
+    # --- Redis ---
+    # Empty selects in-process coordination, which is correct for exactly one
+    # API process. Production refuses to start without it.
+    redis_url: str = ""
+    # A Redis that hangs must fail a request quickly, not stall it; the
+    # database still guards correctness while Redis is away.
+    redis_timeout_seconds: float = 2.0
+
     # --- Conversation and agent budgets ---
     # Enforced by the run service. The composer shows a live counter against
     # the same value, so the client never invents a limit of its own.
@@ -191,6 +199,10 @@ class Settings(BaseSettings):
             problems.append("LLM_API_KEY is required in production")
         if not self.search_api_key:
             problems.append("SEARCH_API_KEY is required in production")
+        # Without it, run locks and rate limits are per process: each replica
+        # would coordinate only with itself.
+        if not self.redis_url:
+            problems.append("REDIS_URL is required in production")
         if problems:
             raise ValueError("Invalid production configuration: " + "; ".join(problems))
         return self
@@ -198,6 +210,16 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment is Environment.production
+
+    @property
+    def run_lock_lease_seconds(self) -> float:
+        """How long a conversation's run lock lives if nobody releases it.
+
+        The same bound the stale-run sweep uses: a healthy run always finishes
+        (and releases) well inside it, and a process that dies holding the lock
+        blocks the conversation no longer than its dead run row already would.
+        """
+        return self.run_timeout_seconds + self.run_stale_grace_seconds
 
     @property
     def cors_origins(self) -> list[str]:

@@ -19,7 +19,7 @@ help: ## Show this help
 
 # --- Stack -------------------------------------------------------------------
 
-dev: ## Build and start the full stack (api, web, postgres, mailpit)
+dev: ## Build and start the full stack (api, web, postgres, redis, mailpit)
 	$(COMPOSE) up --build
 
 rebuild: ## Rebuild and restart after adding a dependency

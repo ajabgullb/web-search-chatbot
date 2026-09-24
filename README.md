@@ -39,7 +39,7 @@ Requires Docker with Compose v2+. For host-side commands you also need
 
 ```bash
 cp .env.example .env      # then edit if any default port is taken
-make dev                  # builds and starts api, web, postgres, mailpit
+make dev                  # builds and starts api, web, postgres, redis, mailpit
 ```
 
 | Service | URL |
@@ -50,9 +50,10 @@ make dev                  # builds and starts api, web, postgres, mailpit
 | Mailpit | http://localhost:8025 |
 
 If another project already uses one of those ports, change `POSTGRES_HOST_PORT`,
-`API_HOST_PORT`, `WEB_HOST_PORT`, `MAILPIT_SMTP_HOST_PORT`, or
-`MAILPIT_UI_HOST_PORT` in `.env` — and keep the port in `DATABASE_URL` in step
-with `POSTGRES_HOST_PORT`, since host tools connect through it.
+`API_HOST_PORT`, `WEB_HOST_PORT`, `REDIS_HOST_PORT`, `MAILPIT_SMTP_HOST_PORT`, or
+`MAILPIT_UI_HOST_PORT` in `.env`. Keep the port in `DATABASE_URL` in step with
+`POSTGRES_HOST_PORT`, and the one in `REDIS_URL` in step with `REDIS_HOST_PORT`,
+since host tools connect through them.
 
 Verify the API is up:
 
