@@ -1,6 +1,7 @@
 # Security
 
-Status: reflects Phase 5 (agent core). Streaming controls land in Phases 6–7.
+Status: reflects the complete v1. The end-to-end suite exercises the
+ownership, session, and link-safety controls below in a real browser.
 
 ## Authentication
 

@@ -8,14 +8,19 @@ sources.
 - [`PLAN.md`](./PLAN.md) — the nine-phase roadmap and per-phase definition of done.
 - [`docs/`](./docs) — architecture, API, security, and decision records.
 
-**Current status: Phase 7 (streaming frontend).** You can register, sign in,
-stay signed in across reloads, reset a password, and manage your conversations.
-Asking a question now streams the answer into the thread as it is written —
-with live search progress, inline citation buttons, and source cards — then
-replaces it with the saved message. You can stop an answer (the server stops
-too), retry a failed or stopped one without duplicating the question, and
-reload mid-answer: the page reconnects and shows the result. See
-[`docs/architecture.md`](docs/architecture.md#streaming-frontend).
+**Status: all nine phases of [`PLAN.md`](./PLAN.md) are implemented.**
+
+- **Accounts.** Register, sign in, stay signed in across reloads, reset a
+  password.
+- **Conversations.** Create, rename, and delete conversations.
+- **Answers.** Asking a question streams the answer with live search
+  progress, inline citation buttons, and source cards. You can stop an
+  answer, retry it, or reload mid-answer.
+- **Production.** The production stack coordinates through Redis, logs
+  structured JSON, exposes Prometheus metrics, shuts down gracefully, and
+  refuses to start on an unsafe configuration.
+- **Testing.** Unit, integration, contract, end-to-end, and evaluation suites
+  back all of this; see [Testing](#testing).
 
 No provider key is needed to run the app or the tests. To get real answers, set
 `LLM_API_KEY` (and `LLM_BASE_URL`/`LLM_MODEL` for a non-OpenAI endpoint such as
@@ -97,6 +102,23 @@ make generate-client  # regenerate ./openapi.json and the typed frontend client
 make down         # stop the stack
 ```
 
+## Testing
+
+No test needs a provider key or a paid API. The LLM and search are replaced
+by deterministic stand-ins everywhere below, except `make eval-live`.
+
+| Layer | Command | What it proves |
+| --- | --- | --- |
+| Unit | `make test-backend`, `make test-frontend` | Auth primitives, routing heuristics, budgets, citation validation, the SSE parser across split chunks, composer keys, rendering |
+| Integration | `make test-backend` (needs `make up-db`) | Repositories, migrations, refresh rotation and reuse detection, ownership (404, never 403), idempotency, concurrency, Redis locks, rate limits and cancel signals (fakeredis), graceful shutdown on a real uvicorn, log hygiene, production config as a real process start |
+| Contract | part of both test suites | The committed `openapi.json` matches the code; the frontend parses exactly the event types the schema publishes |
+| End to end | `make e2e-install` once, then `make e2e` (needs `make up-db`) | Playwright in Chromium against the real app: register and sign in, a streamed cited answer that survives a reload, stop and retry, cross-user denial, a phone layout |
+| Agent evals | `make eval` (free, gated) / `make eval-live` (costs money) | Search decisions, citation validity and precision, degraded answers, prompt injection, follow-ups; see [`backend/evals`](backend/evals/README.md) |
+
+`make e2e` runs the API from `backend/tests/e2e_server.py` on port 8010, with
+its own `<database>_e2e` database emptied at start, and Vite on port 5174. It
+does not touch a running development stack.
+
 ## Running in production
 
 `compose.prod.yaml` runs the images that ship, with production settings:
@@ -133,7 +155,7 @@ secrets. Everything sensitive arrives through the environment at run time.
 ## Layout
 
 ```
-backend/    FastAPI app (app/), Alembic migrations, tests
+backend/    FastAPI app (app/), Alembic migrations, tests, agent evals (evals/)
 frontend/   Vite + React app (src/), Playwright e2e (tests/e2e)
 docs/       architecture, API, security, ADRs
 compose.yaml  local development stack

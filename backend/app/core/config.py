@@ -218,8 +218,8 @@ class Settings(BaseSettings):
     def _production_fails_closed(self) -> Settings:
         """Refuse to boot production with development defaults.
 
-        Phase 8 extends this; the checks that exist must never be relaxed to
-        make an environment start.
+        Checks may be added; the ones that exist must never be relaxed to make
+        an environment start.
         """
         if not self.is_production:
             return self

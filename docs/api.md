@@ -4,8 +4,9 @@ Base path: `/api/v1`. Interactive docs at `/api/v1/docs`; the machine-readable
 schema is committed at [`../openapi.json`](../openapi.json) and regenerated with
 `make openapi`.
 
-Status: reflects Phase 6 — authentication, conversations, messages, and
-streaming runs. See [`PLAN.md`](../PLAN.md) for what comes next.
+Status: the complete v1 API: authentication, conversations, messages,
+streaming runs, health, and metrics. `backend/tests/contract` fails if this
+schema and the code drift apart.
 
 ## Conventions
 
@@ -44,8 +45,10 @@ the same body shape. `redis` appears only when `REDIS_URL` is configured
 (always in production).
 
 ```json
-{ "status": "ready", "checks": { "database": true, "redis": true } }
+{ "status": "ready", "checks": { "database": true, "accepting_work": true, "redis": true } }
 ```
+
+`accepting_work` turns false while the process drains for shutdown.
 
 ### `GET /api/v1/metrics`
 

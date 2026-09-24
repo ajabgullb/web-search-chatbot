@@ -1,6 +1,6 @@
 # Architecture
 
-Status: reflects Phase 8 (production hardening). Updated as each phase lands — see
+Status: reflects the complete v1 (all nine phases). Updated as it changes — see
 [`PLAN.md`](../PLAN.md) for what is coming and [`AGENTS.md`](../AGENTS.md) for
 the contract this implements.
 
@@ -92,8 +92,10 @@ build error responses themselves.
 - `GET /api/v1/health/live` — process liveness. Deliberately independent of
   every external dependency, so an LLM or database outage cannot trigger a
   restart loop.
-- `GET /api/v1/health/ready` — returns `503` with a per-dependency `checks` map
-  when a required dependency is unreachable.
+- `GET /api/v1/health/ready` returns `503` with a `checks` map when the
+  process should not receive traffic. The map covers `database`, `redis` (when
+  configured), and `accepting_work`, which goes false once shutdown starts
+  draining.
 
 ## Database and migrations
 
@@ -406,3 +408,28 @@ checks that a stream open at shutdown still delivers the whole answer.
 | Model or search budget failure | `failed` + code | none | `run.failed` |
 | User pressed stop / tab closed / conversation deleted | `cancelled` + reason | none | `run.cancelled` |
 | Server shutdown or crashed process | `failed`, `run_interrupted` | none | `run.failed` |
+
+## Testing and evaluation
+
+Each layer tests what the one below cannot. See the table in the README for
+commands.
+
+- **Unit and integration** (`backend/tests`, `frontend/src/**/*.test.*`).
+  Every agent test drives the real compiled graph with scripted providers.
+  Integration tests use a real PostgreSQL database (a `_test` sibling of the
+  development one) and fakeredis. Concurrency, cancellation, and shutdown are
+  tested with real tasks and, for SIGTERM, a real uvicorn server.
+- **Contract** (`backend/tests/contract`, `frontend/src/api/contract.test.ts`).
+  The committed schema must equal the app's, and every operation must document
+  the error envelope. The stream parser must know exactly the event types the
+  schema publishes: TypeScript can check that each listed type exists, but not
+  that none is missing, and a missing one would be dropped silently.
+- **End to end** (`frontend/tests/e2e`). Playwright drives Chromium against
+  the real API, started from `backend/tests/e2e_server.py` with scripted LLM
+  and search providers on its own database, and a real Vite server. Everything
+  but the two paid dependencies is the production code path.
+- **Agent evals** (`backend/evals`). A versioned dataset covering every
+  AGENTS.md §13 category. The `ci` subset is deterministic and gated at 100%.
+  The `live` subset uses the configured model and an LLM judge, and is run by
+  hand. See [ADR-0012](adr/0012-testing-and-evaluation.md).
+
