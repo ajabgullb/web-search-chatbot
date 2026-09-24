@@ -34,6 +34,7 @@ VALID_PRODUCTION = {
     "LLM_API_KEY": LLM_KEY,
     "SEARCH_API_KEY": "tvly-leakcheck-0123456789",
     "SMTP_HOST": "smtp.example.com",
+    "SMTP_SECURITY": "starttls",
     "LOG_LEVEL": "INFO",
     "LOG_FORMAT": "json",
     "METRICS_TOKEN": "",
@@ -69,6 +70,7 @@ def test_a_valid_production_configuration_starts() -> None:
         ({"REDIS_URL": ""}, "REDIS_URL"),
         ({"DATABASE_URL": "postgresql+asyncpg://app:app@db:5432/app"}, "database password"),
         ({"SMTP_HOST": ""}, "SMTP_HOST"),
+        ({"SMTP_SECURITY": "none"}, "SMTP_SECURITY"),
         ({"LOG_LEVEL": "DEBUG"}, "DEBUG"),
     ],
 )

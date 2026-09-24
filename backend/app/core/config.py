@@ -185,6 +185,13 @@ class Settings(BaseSettings):
     # --- Email ---
     smtp_host: str = ""
     smtp_port: int = 1025
+    smtp_username: str = ""
+    smtp_password: str = ""
+    # none: plaintext (Mailpit only). starttls: upgrade on connect, usually
+    # port 587. tls: implicit TLS from the first byte, usually port 465.
+    # Production refuses "none": a reset email carries a working credential.
+    smtp_security: Literal["none", "starttls", "tls"] = "none"
+    smtp_timeout_seconds: float = 10.0
     email_from: str = "no-reply@localhost"
 
     # --- Rate limits (requests per window, per client IP) ---
@@ -246,6 +253,10 @@ class Settings(BaseSettings):
         # users who forget their password are locked out.
         if not self.smtp_host:
             problems.append("SMTP_HOST is required in production (password-reset email)")
+        if self.smtp_security == "none":
+            problems.append(
+                "SMTP_SECURITY must be starttls or tls in production: reset links are credentials"
+            )
         # Development conveniences that are wrong for production.
         if self.log_level.upper() == "DEBUG":
             problems.append("LOG_LEVEL must not be DEBUG in production")

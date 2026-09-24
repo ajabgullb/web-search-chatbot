@@ -302,6 +302,8 @@ Booting with `ENVIRONMENT=production` is refused when:
 - `LLM_API_KEY`, `SEARCH_API_KEY`, `REDIS_URL`, or `SMTP_HOST` is missing;
 - `DATABASE_URL` uses a stock password (`app`, `postgres`, `password`, …);
 - `METRICS_TOKEN` is set but under 32 characters;
+- `SMTP_SECURITY=none`, because a reset email carries a working credential and
+  must not travel to the relay in plaintext;
 - `LOG_LEVEL=DEBUG` or `LOG_FORMAT=console`, which are development conveniences.
 
 `DATABASE_URL` must use the async driver in every environment. All problems

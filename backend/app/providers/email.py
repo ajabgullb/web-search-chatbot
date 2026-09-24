@@ -37,6 +37,10 @@ class SmtpEmailSender:
         self._host = settings.smtp_host
         self._port = settings.smtp_port
         self._sender = settings.email_from
+        self._username = settings.smtp_username or None
+        self._password = settings.smtp_password or None
+        self._security = settings.smtp_security
+        self._timeout = settings.smtp_timeout_seconds
 
     async def send(self, payload: EmailPayload) -> None:
         message = EmailMessage()
@@ -45,10 +49,20 @@ class SmtpEmailSender:
         message["Subject"] = payload.subject
         message.set_content(payload.body)
 
-        # Mailpit accepts plaintext on 1025; a real relay is configured with
-        # STARTTLS at the edge. Failures propagate to the caller, which
-        # decides whether the operation is critical.
-        await aiosmtplib.send(message, hostname=self._host, port=self._port, start_tls=False)
+        # Plaintext only for Mailpit in development; production settings
+        # refuse it. Certificates are always verified when TLS is on. Failures
+        # propagate to the caller, which decides whether the operation is
+        # critical.
+        await aiosmtplib.send(
+            message,
+            hostname=self._host,
+            port=self._port,
+            username=self._username,
+            password=self._password,
+            use_tls=self._security == "tls",
+            start_tls=self._security == "starttls",
+            timeout=self._timeout,
+        )
 
 
 class LoggingEmailSender:

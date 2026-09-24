@@ -40,6 +40,7 @@ def production_settings(**overrides: object) -> Settings:
         "redis_url": "redis://redis:6379/0",
         "database_url": "postgresql+asyncpg://app:a-long-random-password@db:5432/app",
         "smtp_host": "smtp.example.com",
+        "smtp_security": "starttls",
         "log_format": "json",
         "log_level": "INFO",
     }
@@ -78,6 +79,7 @@ def test_production_requires_redis() -> None:
     [
         ({"database_url": "postgresql+asyncpg://app:app@db:5432/app"}, "database password"),
         ({"smtp_host": ""}, "SMTP_HOST"),
+        ({"smtp_security": "none"}, "SMTP_SECURITY"),
         ({"log_level": "debug"}, "DEBUG"),
         ({"log_format": "console"}, "LOG_FORMAT"),
         ({"metrics_token": "short"}, "METRICS_TOKEN"),
