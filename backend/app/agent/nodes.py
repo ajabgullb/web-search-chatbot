@@ -39,6 +39,10 @@ SEARCH_UNAVAILABLE_NOTICE = (
     "Web search was unavailable for this answer, so it comes from the model's "
     "own knowledge and could not be verified against sources."
 )
+NO_SOURCES_NOTICE = (
+    "Web search found no usable sources for this question, so this answer comes "
+    "from the model's own knowledge and could not be verified against sources."
+)
 UNVERIFIED_NOTICE = (
     "This answer could not be tied back to a specific source, so treat it as unverified."
 )
@@ -177,6 +181,12 @@ async def web_search(state: AgentState, runtime: Runtime[AgentContext]) -> Agent
         logger.warning("search_unavailable", extra={"search_count": outcome.searches_run})
         update["degraded"] = True
         update["notice"] = SEARCH_UNAVAILABLE_NOTICE
+    elif not outcome.sources:
+        # The search worked and found nothing usable. The answer that follows
+        # comes from memory, exactly as after an outage, and is flagged the
+        # same way: a searched answer with no citation must not look sourced.
+        update["degraded"] = True
+        update["notice"] = NO_SOURCES_NOTICE
     return update
 
 

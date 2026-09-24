@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app.agent.context import AgentLimits
-from app.agent.nodes import SEARCH_UNAVAILABLE_NOTICE
+from app.agent.nodes import NO_SOURCES_NOTICE, SEARCH_UNAVAILABLE_NOTICE
 from app.agent.routing import SearchDecision
 from app.providers.llm import LLMPermanentError, LLMTransientError
 from app.providers.search import SearchPermanentError, SearchTransientError
@@ -158,6 +158,18 @@ class TestDegradedPaths:
         assert result.sources == []
         assert result.citations == []
         assert result.succeeded is True
+
+    async def test_a_search_that_finds_nothing_is_flagged_unverified(self, run: Run) -> None:
+        """AGENTS.md section 7: a searched answer with no valid citation is
+        degraded and says so. Finding nothing is not the same as an outage,
+        but the answer is just as unbacked, and must not look sourced."""
+        search = FakeSearchProvider(default=[])
+        llm = FakeLLM(answers=["It launched last week to strong reviews [S1]."])
+        result = await run("latest news about the zorblax launch", llm=llm, search=search)
+
+        assert result.degraded is True
+        assert result.notice == NO_SOURCES_NOTICE
+        assert "[S1]" not in result.answer
 
     async def test_a_searched_answer_with_no_valid_citation_is_flagged(self, run: Run) -> None:
         search = FakeSearchProvider(default=[hit("https://a.test/1")])
