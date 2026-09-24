@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
 
 import tailwindcss from '@tailwindcss/vite'
@@ -27,6 +28,11 @@ export default defineConfig({
     },
   },
   test: {
+    // The committed API schema, handed to contract tests. Read here, in Node,
+    // because the dev server rightly refuses files outside the project.
+    provide: {
+      openapiSchema: readFileSync(new URL('../openapi.json', import.meta.url), 'utf-8'),
+    },
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],

@@ -1868,13 +1868,13 @@
           },
           "default": {
             "content": {
-              "text/event-stream": {
+              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Error envelope returned for every failure."
+            "description": "Error envelope, as JSON, for failures before the stream starts."
           }
         },
         "security": [

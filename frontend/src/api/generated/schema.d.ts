@@ -1340,13 +1340,13 @@ export interface operations {
                     "text/event-stream": string & (components["schemas"]["RunStartedEvent"] | components["schemas"]["AgentStatusEvent"] | components["schemas"]["SearchStartedEvent"] | components["schemas"]["SearchCompletedEvent"] | components["schemas"]["MessageDeltaEvent"] | components["schemas"]["CitationEvent"] | components["schemas"]["MessageCompletedEvent"] | components["schemas"]["RunFailedEvent"] | components["schemas"]["RunCancelledEvent"]);
                 };
             };
-            /** @description Error envelope returned for every failure. */
+            /** @description Error envelope, as JSON, for failures before the stream starts. */
             default: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

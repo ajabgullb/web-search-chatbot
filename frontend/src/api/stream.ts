@@ -125,7 +125,8 @@ export class SSEParser {
   }
 }
 
-const RUN_EVENT_TYPES: ReadonlySet<string> = new Set<RunEvent['type']>([
+/** Event types this client understands; `contract.test.ts` pins it to the schema. */
+export const RUN_EVENT_TYPES: ReadonlySet<string> = new Set<RunEvent['type']>([
   'run.started',
   'agent.status',
   'search.started',

@@ -69,7 +69,15 @@ _STREAM_RESPONSE: dict[int | str, dict[str, Any]] = {
             "JSON objects; `sequence` starts at 1 and increases by one. See docs/api.md."
         ),
         "content": {"text/event-stream": {"schema": _event_stream_schema()}},
-    }
+    },
+    # Declared with its content type spelled out. Left to the router-wide
+    # default, FastAPI files the envelope under this route's media type,
+    # text/event-stream, but errors (409, 422, 429, 503) are sent as JSON
+    # before any stream starts.
+    "default": {
+        "description": "Error envelope, as JSON, for failures before the stream starts.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}},
+    },
 }
 
 
