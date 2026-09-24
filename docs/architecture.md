@@ -34,7 +34,10 @@ Each layer may call only the one below it.
 | Providers | `app/providers/` | Narrow interfaces over the LLM and search vendors. No vendor type escapes. |
 
 `app/core/` holds cross-cutting concerns: typed settings, security primitives,
-logging, telemetry, rate limiting.
+structured logging, Prometheus metrics (`telemetry.py`), Redis coordination
+(`redis.py`, `run_lock.py`, `run_signals.py`), and rate limiting. Optional
+LangSmith tracing lives with the agent (`app/agent/tracing.py`) because it
+records graph and prompt versions.
 
 ## Lifecycle
 

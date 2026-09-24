@@ -184,6 +184,7 @@ def get_agent_runtime(request: Request) -> AgentRuntime:
         llm=state.llm_provider,
         search=state.search_provider,
         limits=state.agent_limits,
+        tracing=state.tracing,
     )
 
 

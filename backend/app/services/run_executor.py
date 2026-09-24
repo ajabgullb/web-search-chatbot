@@ -48,6 +48,7 @@ from app.agent.events import (
     TextDelta,
 )
 from app.agent.graph import INTERNAL_ERROR, RUN_TIMEOUT_ERROR, AgentGraph, AgentResult, stream_agent
+from app.agent.tracing import Tracing
 from app.core import telemetry
 from app.core.logging import bind_log_context
 from app.core.run_lock import RunLock
@@ -99,6 +100,7 @@ class AgentRuntime:
     llm: LLMProvider
     search: SearchProvider
     limits: AgentLimits
+    tracing: Tracing | None = None
 
 
 @dataclass(eq=False)
@@ -328,6 +330,7 @@ class RunManager:
                     search=runtime.search,
                     limits=runtime.limits,
                     request_id=request_id,
+                    trace=runtime.tracing.for_run(run_id=run.id) if runtime.tracing else None,
                 )
                 result = await self._drive(handle, runtime, context, history)
             except asyncio.CancelledError:

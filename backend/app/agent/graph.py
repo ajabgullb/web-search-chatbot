@@ -170,7 +170,14 @@ async def stream_agent(
     timeout wrapped around a ``yield`` would also count time the consumer
     spends between items. See :func:`run_agent` and the run executor.
     """
-    config: RunnableConfig = {"configurable": {"thread_id": str(context.conversation_id)}}
+    config: RunnableConfig = {
+        "configurable": {"thread_id": str(context.conversation_id)},
+        "run_name": "chat_run",
+    }
+    if context.trace is not None:
+        config["tags"] = context.trace.tags
+        config["metadata"] = context.trace.metadata
+        config["callbacks"] = context.trace.callbacks
     final: AgentState | None = None
 
     async for mode, chunk in graph.astream(

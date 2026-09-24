@@ -12,6 +12,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+from app.agent.tracing import TraceConfig
 from app.core.config import Settings
 from app.providers.llm import LLMProvider
 from app.providers.search import SearchProvider
@@ -53,3 +54,5 @@ class AgentContext:
     # Correlates every log line of this run with the HTTP request that started
     # it. Optional because the graph is also driven directly by tests.
     request_id: str | None = None
+    # Tags, version metadata, and (when tracing is on) the tracer callback.
+    trace: TraceConfig | None = None

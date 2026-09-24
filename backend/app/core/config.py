@@ -115,6 +115,12 @@ class Settings(BaseSettings):
     # Bearer token a Prometheus scraper must present at /metrics. Empty in
     # production closes the endpoint; empty in development leaves it open.
     metrics_token: str = ""
+    # Optional LangSmith tracing. Inputs and outputs are never uploaded; see
+    # app/agent/tracing.py. The endpoint is for the EU region or self-hosting.
+    langsmith_tracing: bool = False
+    langsmith_api_key: str = ""
+    langsmith_project: str = "web-search-chatbot"
+    langsmith_endpoint: str = ""
 
     # --- Request limits ---
     # Sized so any valid message fits however it is encoded. The worst case is
@@ -230,6 +236,8 @@ class Settings(BaseSettings):
         # would coordinate only with itself.
         if not self.redis_url:
             problems.append("REDIS_URL is required in production")
+        if self.langsmith_tracing and not self.langsmith_api_key:
+            problems.append("LANGSMITH_API_KEY is required when LANGSMITH_TRACING is true")
         if self.metrics_token and len(self.metrics_token) < 32:
             problems.append("METRICS_TOKEN must be at least 32 characters when set")
         if (self.database_url.hosts()[0].get("password") or "") in _WEAK_DATABASE_PASSWORDS:

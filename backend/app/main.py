@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from app.agent.checkpointer import checkpointer_for
 from app.agent.context import AgentLimits
 from app.agent.graph import build_graph
+from app.agent.tracing import build_tracing
 from app.api.errors import register_exception_handlers
 from app.api.middleware import (
     BodySizeLimitMiddleware,
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.llm_provider = build_llm_provider(settings)
     app.state.search_provider = build_search_provider(settings)
     app.state.agent_limits = AgentLimits.from_settings(settings)
+    app.state.tracing = build_tracing(settings)
     cancel_signal = RedisCancelSignal(app.state.redis) if app.state.redis is not None else None
     app.state.run_manager = RunManager(
         app.state.database,
@@ -97,6 +99,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 drain_seconds=app.state.settings.shutdown_drain_seconds
             )
             await app.state.search_provider.aclose()
+            await app.state.tracing.aclose()
             if app.state.redis is not None:
                 await app.state.redis.aclose()
             await app.state.database.dispose()

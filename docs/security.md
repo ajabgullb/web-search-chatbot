@@ -156,6 +156,28 @@ logged on every call. `tests/integration/test_log_hygiene.py` drives a whole
 session (register, login, refresh, a searched and cited run, logout) and
 fails if any credential or piece of content appears in the output.
 
+## Tracing
+
+LangSmith tracing is off unless `LANGSMITH_TRACING=true`
+(`app/agent/tracing.py`). When it is on, a tracer is attached to each run
+explicitly. Inputs and outputs are replaced with empty payloads inside the
+process, before upload, so prompts, conversation turns, search results, and
+answers never leave. Traces keep structure, timings, token counts, errors,
+the `env:` and `prompt:` tags, and metadata: environment, prompt and graph
+versions, and run id. User and conversation are left out, so a trace cannot
+be tied to a person's activity.
+
+LangChain's implicit tracing, which a `LANGSMITH_TRACING` variable in the
+container environment would switch on with full content, is forced off at
+startup. The app owns that decision.
+
+A unit test captures the bytes the LangSmith client would send for a
+searched, cited run and checks that the question, the page text, and the
+answer are absent. With hiding disabled, the same test sees them. An
+unreachable LangSmith does not slow runs, and the app's shutdown gives up on
+the final flush after 5 s. The SDK's own exit handler may still retry for a
+few seconds before the process ends.
+
 ## Authorization and data isolation
 
 Every conversation and message query is constrained by the authenticated
