@@ -21,7 +21,7 @@ from app.api.middleware import RequestIdMiddleware, SecurityHeadersMiddleware
 from app.api.v1.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
-from app.core.rate_limit import InMemoryRateLimiter
+from app.core.rate_limit import build_rate_limiter
 from app.core.redis import build_redis_client
 from app.core.run_lock import build_run_lock
 from app.db.session import Database
@@ -38,8 +38,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
     app.state.database = Database(settings)
     app.state.email_sender = build_email_sender(settings)
-    app.state.rate_limiter = InMemoryRateLimiter()
     app.state.redis = build_redis_client(settings)
+    app.state.rate_limiter = build_rate_limiter(app.state.redis)
     app.state.run_lock = build_run_lock(
         app.state.redis, lease_seconds=settings.run_lock_lease_seconds
     )

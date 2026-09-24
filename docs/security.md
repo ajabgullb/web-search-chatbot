@@ -94,9 +94,18 @@ Starting a run is limited **per user** (20 per minute by default,
 `RATE_LIMIT_RUNS`): it is the path that spends provider money, and a per-IP
 limit would let one account on a shared network starve the others.
 
-The limiter is **in-process**: with N replicas the effective limit is
-N x the configured value. Phase 8 replaces it with a Redis-backed limiter
-behind the same interface.
+With `REDIS_URL` set (required in production) the windows live in Redis and
+are shared by every replica. Each check is one Lua script: it drops expired
+entries, counts, and records the attempt atomically, using Redis's clock so
+replicas with drifting clocks agree. Only allowed attempts are recorded, so a
+client that keeps hammering does not extend its own ban. Without Redis the
+limiter is in-process, and with N replicas the effective limit is N x the
+configured value.
+
+If Redis becomes unreachable, the limiter **degrades to per-process limits**
+and logs `rate_limit_degraded`. Failing closed would lock every user out of
+login during an outage. Failing open would remove brute-force protection
+entirely. Per-process limits are weaker, but they are still limits.
 
 ## Error handling
 

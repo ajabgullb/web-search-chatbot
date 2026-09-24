@@ -184,11 +184,11 @@ def get_agent_runtime(request: Request) -> AgentRuntime:
 AgentRuntimeDep = Annotated[AgentRuntime, Depends(get_agent_runtime)]
 
 
-def enforce_run_rate_limit(
+async def enforce_run_rate_limit(
     current_user: CurrentUserDep, settings: SettingsDep, limiter: RateLimiterDep
 ) -> None:
     """Per-user limit on starting runs — the path that spends provider money."""
-    decision = limiter.hit(
+    decision = await limiter.hit(
         f"runs:{current_user.id}",
         limit=settings.rate_limit_runs,
         window_seconds=settings.rate_limit_runs_window_seconds,
@@ -227,14 +227,14 @@ def rate_limit(bucket: str, limit_attribute: str) -> DependsMarker:
     import time, so tests can raise or lower it without re-importing routes.
     """
 
-    def dependency(
+    async def dependency(
         request: Request,
         settings: SettingsDep,
         limiter: RateLimiterDep,
     ) -> None:
         client_ip = request.client.host if request.client else "unknown"
         limit: int = getattr(settings, limit_attribute)
-        decision = limiter.hit(
+        decision = await limiter.hit(
             f"{bucket}:{client_ip}",
             limit=limit,
             window_seconds=settings.rate_limit_window_seconds,
