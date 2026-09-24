@@ -1,0 +1,69 @@
+# Rendered at container start by the image's envsubst step, which replaces
+# only variables defined in the environment: ${API_UPSTREAM} and
+# ${NGINX_RESOLVER}. nginx's own $variables pass through untouched.
+
+# HSTS only when the request reached us over TLS (terminated in front of this
+# server). Sent over plain http it would be ignored anyway; an empty value
+# omits the header.
+map $http_x_forwarded_proto $hsts_header {
+    https   "max-age=31536000; includeSubDomains";
+    default "";
+}
+
+map $http_x_forwarded_proto $forwarded_proto {
+    ""      $scheme;
+    default $http_x_forwarded_proto;
+}
+
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    server_tokens off;
+
+    # The API, same origin: no CORS, and the refresh cookie scoped to
+    # /api/v1/auth works exactly as in development.
+    location /api/ {
+        # Resolved per request (a variable in proxy_pass), not once at
+        # startup: a restarted API container gets a new address.
+        resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
+        set $api_upstream ${API_UPSTREAM};
+        proxy_pass $api_upstream;
+
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+
+        # Run streams are server-sent events: every event must reach the
+        # browser as it is written, not when a buffer fills.
+        proxy_buffering off;
+        proxy_cache off;
+        # Longer than the heartbeat (15 s) so a quiet stream is never cut.
+        proxy_read_timeout 120s;
+        # Matches the API's MAX_REQUEST_BODY_BYTES; refused here first.
+        client_max_body_size 256k;
+        # The API sets its own security headers; none are added here.
+    }
+
+    # add_header in a location replaces, not extends, the server's headers,
+    # so each location includes the full set.
+
+    # Hashed assets are immutable; the entry HTML must never be cached.
+    location /assets/ {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+    }
+
+    location = /index.html {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-store" always;
+    }
+
+    # Client-side routing: unknown paths fall back to the SPA entry point.
+    location / {
+        include /etc/nginx/snippets/security-headers.conf;
+        try_files $uri $uri/ /index.html;
+    }
+}

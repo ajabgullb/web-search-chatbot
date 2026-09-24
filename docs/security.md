@@ -72,7 +72,18 @@ users; rate limiting blunts enumeration through this route.
   `Permissions-Policy`, `Cache-Control: no-store`, and
   `Content-Security-Policy: default-src 'none'; frame-ancestors 'none';
   base-uri 'none'` (relaxed only for the Swagger docs page, which loads a CDN
-  bundle). HSTS is added in production.
+  bundle, and which production does not serve). HSTS is added in production.
+- **The frontend's own CSP** is set by its nginx (`frontend/nginx/`):
+  `default-src 'self'`, with no `'unsafe-inline'`, no `'unsafe-eval'`, and no
+  third-party hosts, because the built app needs none of them. `img-src` allows
+  only this origin and `data:`. A Markdown image in an answer that points at an
+  attacker's server is blocked, which closes a known channel for exfiltrating
+  data through prompt injection. The policy was checked by rendering every
+  public route of the production image in headless Chrome: no violations
+  (a positive control confirmed that violations are detected). The same
+  config adds `nosniff`, frame denial, a referrer policy, COOP, and HSTS when
+  the request came over TLS (`X-Forwarded-Proto: https`). TLS itself is
+  terminated in front of this nginx; see the deployment notes in the README.
 - **Browser storage is off-limits for auth.** ESLint fails the build on
   `localStorage` and `sessionStorage`, in both the bare-global and `window.`
   spellings. The access token is a module variable in `src/api/client.ts` and
@@ -293,8 +304,7 @@ size and checkout timeout.
 
 ## Not yet implemented
 
-Email verification (`is_verified` exists but is unused), CSP tuned to the
-frontend, and a purge
+Email verification (`is_verified` exists but is unused), and a purge
 policy for soft-deleted conversations and their runs.
 
 ## Reporting
