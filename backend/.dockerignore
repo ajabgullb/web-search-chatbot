@@ -11,3 +11,4 @@ tests
 .env
 .env.*
 !.env.example
+evals

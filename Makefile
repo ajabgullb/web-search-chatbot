@@ -11,7 +11,7 @@ COMPOSE := docker compose
 .PHONY: help dev rebuild down logs up-db check-db install migrate migration downgrade \
         test test-backend test-frontend e2e lint lint-backend lint-frontend \
         format format-check typecheck typecheck-backend typecheck-frontend \
-        openapi generate-client clean prod-up prod-down prod-logs
+        openapi generate-client clean prod-up prod-down prod-logs eval eval-live
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -83,6 +83,12 @@ test-frontend: ## Run Vitest
 e2e: ## Run Playwright end-to-end tests (wired up in Phase 9)
 	@echo "Playwright is set up in Phase 9 -- see PLAN.md."
 
+eval: ## Run the deterministic agent evals (free; what CI gates on)
+	cd $(BACKEND) && uv run python -m evals.run --subset ci
+
+eval-live: ## Run agent evals against the real model and search (costs money)
+	cd $(BACKEND) && uv run python -m evals.run --subset live
+
 lint: lint-backend lint-frontend ## Lint everything
 
 lint-backend:
@@ -100,7 +106,7 @@ format-check: lint ## Alias for lint
 typecheck: typecheck-backend typecheck-frontend ## Type-check everything
 
 typecheck-backend:
-	cd $(BACKEND) && uv run mypy app
+	cd $(BACKEND) && uv run mypy app evals
 
 typecheck-frontend:
 	cd $(FRONTEND) && npm run typecheck
