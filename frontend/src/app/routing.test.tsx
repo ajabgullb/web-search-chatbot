@@ -107,19 +107,22 @@ describe('route guards', () => {
   })
 
   it('returns the user to the route they originally wanted', async () => {
+    // A specific conversation, not /chat: /chat is where sign-in lands by
+    // default, so it could not tell a restored destination from a lost one.
+    const destination = '/chat/0b9e5c0e-6d7a-4f1e-9d8a-3c2b1a0f9e8d'
     const user = userEvent.setup()
     stubApi({
       '/auth/refresh': () => errorResponse(401, 'invalid_token'),
       '/auth/login': () => jsonResponse(200, tokenPayload),
     })
-    renderApp(<App />, { route: '/chat' })
+    renderApp(<App />, { route: destination })
 
     await screen.findByRole('heading', { name: /sign in/i })
     await user.type(screen.getByLabelText(/email/i), 'user@example.com')
     await user.type(screen.getByLabelText(/password/i), 'correct-horse-battery-staple')
     await user.click(screen.getByRole('button', { name: /sign in/i }))
 
-    await waitFor(() => expect(window.location.pathname).toBe('/chat'))
+    await waitFor(() => expect(window.location.pathname).toBe(destination))
   })
 
   it('keeps a signed-in user off the login page', async () => {

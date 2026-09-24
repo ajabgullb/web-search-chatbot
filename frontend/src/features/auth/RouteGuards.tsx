@@ -6,7 +6,7 @@
  * every reload — the session is real, the app just does not know it yet.
  */
 
-import { Navigate, Outlet, useLocation } from 'react-router'
+import { type Location, Navigate, Outlet, useLocation } from 'react-router'
 
 import { FullPageSpinner } from '@/components/FullPageSpinner'
 import { useAuth } from '@/features/auth/useAuth'
@@ -28,9 +28,17 @@ export function RequireAuth() {
 
 export function RedirectIfAuthenticated() {
   const { status } = useAuth()
+  const location = useLocation()
 
   if (status === 'bootstrapping') return <FullPageSpinner label="Restoring your session" />
-  if (status === 'authenticated') return <Navigate to="/chat" replace />
+  if (status === 'authenticated') {
+    // Signing in flips the status, which re-renders this guard before the
+    // login page's own navigate() runs. Honour the same `state.from` it would
+    // have, or the redirect here wins and the destination is lost.
+    const from = (location.state as { from?: Location } | null)?.from
+    const destination = from ? `${from.pathname}${from.search}${from.hash}` : '/chat'
+    return <Navigate to={destination} replace />
+  }
 
   return <Outlet />
 }
