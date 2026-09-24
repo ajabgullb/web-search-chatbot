@@ -94,6 +94,12 @@ class RateLimited(AppError):
     message = "Too many requests. Try again shortly."
 
 
+class PayloadTooLarge(AppError):
+    status_code = status.HTTP_413_CONTENT_TOO_LARGE
+    code = "payload_too_large"
+    message = "The request body is too large."
+
+
 class ServiceUnavailable(AppError):
     """A dependency the request needs is down. Retryable by definition."""
 
@@ -203,6 +209,18 @@ def _envelope(
         status_code=status_code,
         content=jsonable_encoder(body),
         headers=headers,
+    )
+
+
+def error_response(exc: AppError) -> JSONResponse:
+    """The envelope for ``exc``, for code outside the exception handlers
+    (pure ASGI middleware that answers before routing)."""
+    return _envelope(
+        status_code=exc.status_code,
+        code=exc.code,
+        message=exc.detail_message,
+        details=exc.details,
+        headers=exc.headers,
     )
 
 

@@ -38,6 +38,10 @@ def production_settings(**overrides: object) -> Settings:
         "llm_api_key": "sk-not-a-real-key",
         "search_api_key": "tvly-not-a-real-key",
         "redis_url": "redis://redis:6379/0",
+        "database_url": "postgresql+asyncpg://app:a-long-random-password@db:5432/app",
+        "smtp_host": "smtp.example.com",
+        "log_format": "json",
+        "log_level": "INFO",
     }
     values.update(overrides)
     return Settings(**values)  # type: ignore[arg-type]
@@ -67,6 +71,37 @@ def test_production_requires_redis() -> None:
     """Without it every replica would lock and rate-limit only against itself."""
     with pytest.raises(ValidationError, match="REDIS_URL"):
         production_settings(redis_url="")
+
+
+@pytest.mark.parametrize(
+    ("override", "complaint"),
+    [
+        ({"database_url": "postgresql+asyncpg://app:app@db:5432/app"}, "database password"),
+        ({"smtp_host": ""}, "SMTP_HOST"),
+        ({"log_level": "debug"}, "DEBUG"),
+        ({"log_format": "console"}, "LOG_FORMAT"),
+        ({"metrics_token": "short"}, "METRICS_TOKEN"),
+    ],
+)
+def test_production_rejects_development_conveniences(
+    override: dict[str, object], complaint: str
+) -> None:
+    with pytest.raises(ValidationError, match=complaint):
+        production_settings(**override)
+
+
+def test_production_lists_every_problem_at_once() -> None:
+    """Fixing one problem per deploy attempt is a slow way to find five."""
+    with pytest.raises(ValidationError) as caught:
+        production_settings(jwt_secret="changeme" * 5, redis_url="", smtp_host="")
+    message = str(caught.value)
+    assert "REDIS_URL" in message
+    assert "SMTP_HOST" in message
+
+
+def test_api_docs_are_hidden_in_production() -> None:
+    assert production_settings().expose_api_docs is False
+    assert Settings(environment=Environment.development).expose_api_docs is True
 
 
 def test_development_does_not_require_redis() -> None:

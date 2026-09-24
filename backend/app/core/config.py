@@ -18,6 +18,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # app/core/config.py -> app/core -> app -> backend -> repository root.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
+# Database passwords that ship in examples and tutorials.
+_WEAK_DATABASE_PASSWORDS = frozenset({"", "app", "postgres", "password", "changeme", "secret"})
+
 # Values shipped in .env.example. Fine for development, never for production.
 _INSECURE_SECRETS = frozenset(
     {
@@ -28,6 +31,9 @@ _INSECURE_SECRETS = frozenset(
         "",
     }
 )
+
+
+PRODUCTION_CONFIG_ERROR = "Refusing to start in production:\n"
 
 
 class Environment(StrEnum):
@@ -109,6 +115,13 @@ class Settings(BaseSettings):
     # Bearer token a Prometheus scraper must present at /metrics. Empty in
     # production closes the endpoint; empty in development leaves it open.
     metrics_token: str = ""
+
+    # --- Request limits ---
+    # Sized so any valid message fits however it is encoded. The worst case is
+    # a 16,000-character message of emoji with ASCII-only JSON escaping
+    # (Python's default): 12 bytes each, about 192 KB. Anything bigger is
+    # refused before it is buffered or parsed.
+    max_request_body_bytes: int = 262_144
 
     # --- Conversation and agent budgets ---
     # Enforced by the run service. The composer shows a live counter against
@@ -214,8 +227,19 @@ class Settings(BaseSettings):
             problems.append("REDIS_URL is required in production")
         if self.metrics_token and len(self.metrics_token) < 32:
             problems.append("METRICS_TOKEN must be at least 32 characters when set")
+        if (self.database_url.hosts()[0].get("password") or "") in _WEAK_DATABASE_PASSWORDS:
+            problems.append("DATABASE_URL must use a strong database password in production")
+        # Without SMTP, reset emails are logged as suppressed and never sent:
+        # users who forget their password are locked out.
+        if not self.smtp_host:
+            problems.append("SMTP_HOST is required in production (password-reset email)")
+        # Development conveniences that are wrong for production.
+        if self.log_level.upper() == "DEBUG":
+            problems.append("LOG_LEVEL must not be DEBUG in production")
+        if self.log_format != "json":
+            problems.append("LOG_FORMAT must be json in production")
         if problems:
-            raise ValueError("Invalid production configuration: " + "; ".join(problems))
+            raise ValueError(PRODUCTION_CONFIG_ERROR + "\n".join(f"  - {p}" for p in problems))
         return self
 
     @property
@@ -231,6 +255,12 @@ class Settings(BaseSettings):
         blocks the conversation no longer than its dead run row already would.
         """
         return self.run_timeout_seconds + self.run_stale_grace_seconds
+
+    @property
+    def expose_api_docs(self) -> bool:
+        """Swagger UI and the raw schema are for developers. In production
+        they are a map of every endpoint, handed to anyone who asks."""
+        return not self.is_production
 
     @property
     def cors_origins(self) -> list[str]:

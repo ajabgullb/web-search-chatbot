@@ -262,16 +262,39 @@ token.
 
 ## Configuration fails closed
 
-Booting with `ENVIRONMENT=production` is refused when `JWT_SECRET` is a known
-placeholder or under 32 characters, when `FRONTEND_ORIGIN` contains a
-wildcard or is not `https`, or when `LLM_API_KEY` or `SEARCH_API_KEY` is
-missing. `DATABASE_URL` must use the async driver. Phase 8
-extends these checks; they are never relaxed to make an environment start.
+Booting with `ENVIRONMENT=production` is refused when:
+
+- `JWT_SECRET` is a known placeholder or under 32 characters;
+- `FRONTEND_ORIGIN` contains a wildcard or is not `https`;
+- `LLM_API_KEY`, `SEARCH_API_KEY`, `REDIS_URL`, or `SMTP_HOST` is missing;
+- `DATABASE_URL` uses a stock password (`app`, `postgres`, `password`, …);
+- `METRICS_TOKEN` is set but under 32 characters;
+- `LOG_LEVEL=DEBUG` or `LOG_FORMAT=console`, which are development conveniences.
+
+`DATABASE_URL` must use the async driver in every environment. All problems
+are reported at once, as a plain list that names each setting and never its
+value. Pydantic's default error embeds the rejected input, which here is the
+environment and its secrets, so the app catches it and exits with only the
+messages. Production also serves no `/docs` and no `/openapi.json`.
+`tests/integration/test_prod_config.py` starts real processes to check each
+rule and to check that no secret appears in the output. These checks are never
+relaxed to make an environment start.
+
+## Request limits
+
+Bodies over `MAX_REQUEST_BODY_BYTES` (256 KiB) are refused with
+`413 payload_too_large` before they are parsed. A declared `Content-Length`
+is checked without reading the body, and a chunked body is counted as it
+arrives. The limit is sized so that any valid message fits however it is
+encoded. The worst case, 16,000 emoji ASCII-escaped by the client, is about
+192 KB. Other bounds: message length (16,000 characters), output tokens,
+results per search, per-search and per-run timeouts, and the database pool
+size and checkout timeout.
 
 ## Not yet implemented
 
 Email verification (`is_verified` exists but is unused), CSP tuned to the
-frontend, a request body size limit, and a purge
+frontend, and a purge
 policy for soft-deleted conversations and their runs.
 
 ## Reporting

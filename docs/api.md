@@ -305,5 +305,6 @@ is set only when `failed`; `cancel_reason` only when `cancelled`.
 | `message_empty` | 422 | The message is blank after trimming |
 | `message_too_long` | 422 | Over `MAX_USER_MESSAGE_CHARS`; `details` has the limit and length |
 | `invalid_cursor` | 400 | Pagination cursor was not produced by this API |
+| `payload_too_large` | 413 | Body over `MAX_REQUEST_BODY_BYTES`; `details.max_bytes` when the size was declared |
 | `service_unavailable` | 503 | A required dependency (Redis, for run creation) is down; retry shortly |
 | `internal_error` | 500 | Unexpected failure; quote `request_id` |

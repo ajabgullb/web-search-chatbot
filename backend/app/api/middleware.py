@@ -7,11 +7,13 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.api.errors import PayloadTooLarge, error_response
 from app.core import telemetry
 from app.core.config import Settings
 from app.core.logging import clear_log_context
@@ -118,3 +120,59 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             )
 
         return response
+
+
+class BodySizeLimitMiddleware:
+    """Refuse request bodies over ``MAX_REQUEST_BODY_BYTES`` before parsing them.
+
+    Pure ASGI rather than ``BaseHTTPMiddleware``, because it must see the body
+    as it arrives. Two cases:
+
+    - A declared ``Content-Length`` over the limit is refused at once, and the
+      body is never read.
+    - A body without one (chunked transfer) is counted as it streams in, and
+      reading stops the moment it passes the limit. The error is raised inside
+      the application's body read. It must be Starlette's HTTPException:
+      FastAPI re-raises that from a failed body read, but rewrites anything
+      else into a generic 400. The normal handlers then build the envelope.
+    """
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self._app = app
+        self._max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        declared = _content_length(scope)
+        if declared is not None and declared > self._max_bytes:
+            await error_response(self._too_large())(scope, receive, send)
+            return
+
+        received = 0
+
+        async def limited_receive() -> Message:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self._max_bytes:
+                    raise StarletteHTTPException(413, PayloadTooLarge.message)
+            return message
+
+        await self._app(scope, limited_receive, send)
+
+    def _too_large(self) -> PayloadTooLarge:
+        return PayloadTooLarge(details={"max_bytes": self._max_bytes})
+
+
+def _content_length(scope: Scope) -> int | None:
+    for name, value in scope["headers"]:
+        if name == b"content-length":
+            try:
+                return int(value)
+            except ValueError:
+                return None
+    return None
