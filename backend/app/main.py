@@ -63,9 +63,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.cancel_signal = cancel_signal
 
     logger.info(
-        "application startup: environment=%s redis=%s",
-        settings.environment,
-        "enabled" if app.state.redis is not None else "disabled",
+        "app_started",
+        extra={"environment": settings.environment.value, "redis": app.state.redis is not None},
     )
     async with AsyncExitStack() as stack:
         checkpointer = await stack.enter_async_context(checkpointer_for(settings))
@@ -92,12 +91,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if app.state.redis is not None:
                 await app.state.redis.aclose()
             await app.state.database.dispose()
-            logger.info("application shutdown complete")
+            logger.info("app_stopped")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    setup_logging(settings.log_level)
+    setup_logging(settings.log_level, log_format=settings.log_format)
 
     app = FastAPI(
         title=settings.app_name,

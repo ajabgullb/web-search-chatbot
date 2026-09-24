@@ -58,7 +58,9 @@ class LoggingEmailSender:
     """
 
     async def send(self, payload: EmailPayload) -> None:
-        logger.info("email_suppressed subject=%r (no SMTP_HOST configured)", payload.subject)
+        # No SMTP_HOST configured. The body holds the reset link, so only the
+        # subject is logged.
+        logger.info("email_suppressed", extra={"subject": payload.subject})
 
 
 def build_email_sender(settings: Settings) -> EmailSender:

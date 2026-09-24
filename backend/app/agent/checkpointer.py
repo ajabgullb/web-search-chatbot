@@ -42,5 +42,5 @@ async def checkpointer_for(settings: Settings) -> AsyncIterator[AsyncPostgresSav
     dsn = psycopg_dsn(str(settings.database_url))
     async with AsyncPostgresSaver.from_conn_string(dsn) as saver:
         await saver.setup()
-        logger.info("langgraph checkpointer ready")
+        logger.info("checkpointer_ready")
         yield saver

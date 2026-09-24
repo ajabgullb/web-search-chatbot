@@ -192,10 +192,12 @@ class RunService:
                 await asyncio.shield(self._run_lock.release(conversation_key, run_id))
 
         logger.info(
-            "run_accepted run_id=%s conversation_id=%s retry=%s",
-            accepted.run.id,
-            conversation_key,
-            payload.retry_message_id is not None,
+            "run_accepted",
+            extra={
+                "run_id": accepted.run.id,
+                "conversation_id": conversation_key,
+                "retry": payload.retry_message_id is not None,
+            },
         )
         return accepted
 
@@ -206,10 +208,10 @@ class RunService:
             # Fail closed. The database index would still prevent a second
             # run, but production is configured to coordinate through Redis,
             # and silently running without it hides an outage.
-            logger.error("run_lock_unavailable conversation_id=%s", conversation_id)
+            logger.error("run_lock_unavailable", extra={"conversation_id": conversation_id})
             raise ServiceUnavailable from None
         if not taken:
-            logger.info("run_rejected_locked conversation_id=%s", conversation_id)
+            logger.info("run_rejected_locked", extra={"conversation_id": conversation_id})
             raise await self._in_progress(conversation_id)
 
     def _check_length(self, content: str) -> None:
@@ -322,7 +324,8 @@ class RunService:
             await self._run_lock.release(conversation_id, run_id)
         if expired:
             logger.warning(
-                "run_expired_stale conversation_id=%s count=%d", conversation_id, len(expired)
+                "run_expired_stale",
+                extra={"conversation_id": conversation_id, "count": len(expired)},
             )
 
     # --- read -------------------------------------------------------------

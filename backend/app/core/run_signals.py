@@ -79,7 +79,7 @@ class RedisCancelSignal:
         try:
             await self._client.publish(CHANNEL, request.encode())
         except RedisError:
-            logger.warning("run_cancel_signal_failed reason=%s", request.reason)
+            logger.warning("run_cancel_signal_failed", extra={"reason": request.reason})
 
     async def listen(self, handler: Callable[[CancelRequest], None]) -> None:
         """Deliver every signal to ``handler`` until cancelled.
@@ -110,5 +110,5 @@ class RedisCancelSignal:
                             logger.exception("run_cancel_signal_handler_failed")
             except RedisError:
                 self.subscribed.clear()
-                logger.warning("run_cancel_signal_disconnected; resubscribing")
+                logger.warning("run_cancel_signal_disconnected")
                 await asyncio.sleep(_RECONNECT_SECONDS)

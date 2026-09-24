@@ -10,6 +10,7 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -59,6 +60,9 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     frontend_origin: str = "http://localhost:5173"
     log_level: str = "INFO"
+    # JSON for anything a machine reads (every deployed environment); console
+    # is a readable single line for a developer's terminal. Both redact.
+    log_format: Literal["json", "console"] = "json"
 
     # --- Database ---
     database_url: PostgresDsn = Field(

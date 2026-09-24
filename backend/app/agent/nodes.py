@@ -136,7 +136,7 @@ async def decide_search(state: AgentState, runtime: Runtime[AgentContext]) -> Ag
         # The classifier is not worth failing the run over. Answering directly
         # is the cheaper wrong answer: it spends no search budget, and if the
         # model is genuinely down the answer node will report it properly.
-        logger.warning("search_decision_failed error=%s", type(exc).__name__)
+        logger.warning("search_decision_failed", extra={"error_type": type(exc).__name__})
         return AgentState(
             search_decision=False,
             search_rationale="model: decision unavailable, answering directly",
@@ -169,7 +169,7 @@ async def web_search(state: AgentState, runtime: Runtime[AgentContext]) -> Agent
     if outcome.provider_failed:
         # Not terminal. A direct answer is worth more to the user than an error
         # page, as long as they are told it is unverified.
-        logger.warning("search_unavailable queries=%d", outcome.searches_run)
+        logger.warning("search_unavailable", extra={"search_count": outcome.searches_run})
         update["degraded"] = True
         update["notice"] = SEARCH_UNAVAILABLE_NOTICE
     return update
@@ -207,7 +207,7 @@ async def synthesize(state: AgentState, runtime: Runtime[AgentContext]) -> Agent
     if degraded:
         update["notice"] = UNVERIFIED_NOTICE
     if discarded:
-        logger.warning("citations_invalid discarded=%d", len(discarded))
+        logger.warning("citations_invalid", extra={"count": len(discarded)})
     return update
 
 
@@ -230,7 +230,7 @@ async def answer_direct(state: AgentState, runtime: Runtime[AgentContext]) -> Ag
 
     answer, citations, discarded = extract_citations(streamed.raw_text, [])
     if discarded:
-        logger.warning("uncited_markers_stripped count=%d", len(discarded))
+        logger.warning("uncited_markers_stripped", extra={"count": len(discarded)})
 
     return AgentState(
         answer=answer,
@@ -250,21 +250,20 @@ async def finalize(state: AgentState, runtime: Runtime[AgentContext]) -> AgentSt
     error = state.get("error")
     if error is not None:
         logger.info(
-            "run_failed run_id=%s code=%s retryable=%s",
-            state.get("run_id", ""),
-            error["code"],
-            error["retryable"],
+            "agent_failed",
+            extra={"error_code": error["code"], "retryable": error["retryable"]},
         )
         return AgentState(messages=[])
 
     answer = state.get("answer", "")
     logger.info(
-        "run_completed run_id=%s searched=%s searches=%d citations=%d degraded=%s",
-        state.get("run_id", ""),
-        state.get("search_decision", False),
-        state.get("search_iterations", 0),
-        len(state.get("citations", [])),
-        state.get("degraded", False),
+        "agent_completed",
+        extra={
+            "searched": state.get("search_decision", False),
+            "search_count": state.get("search_iterations", 0),
+            "citation_count": len(state.get("citations", [])),
+            "degraded": state.get("degraded", False),
+        },
     )
     # Appended through the reducer so the checkpointed transcript matches what
     # the next turn in this thread will see.

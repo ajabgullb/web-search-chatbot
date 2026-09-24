@@ -21,6 +21,7 @@ from app.api.errors import (
     InvalidToken,
 )
 from app.core.config import Settings
+from app.core.logging import user_ref
 from app.core.security import (
     create_access_token,
     fingerprint_ip,
@@ -101,7 +102,7 @@ class AuthService:
 
         tokens = await self._start_session(user, client=client)
         await self._session.commit()
-        logger.info("user_registered user_id=%s", user.id)
+        logger.info("user_registered", extra={"user": user_ref(user.id)})
         return tokens
 
     async def login(self, *, email: str, password: str, client: ClientContext) -> IssuedTokens:
@@ -123,7 +124,7 @@ class AuthService:
 
         tokens = await self._start_session(user, client=client)
         await self._session.commit()
-        logger.info("user_logged_in user_id=%s", user.id)
+        logger.info("user_logged_in", extra={"user": user_ref(user.id)})
         return tokens
 
     # --- Refresh rotation ----------------------------------------------------
@@ -146,10 +147,12 @@ class AuthService:
             revoked = await self._sessions.revoke_family(stored.family_id, at=now)
             await self._session.commit()
             logger.warning(
-                "refresh_token_reuse_detected user_id=%s family_id=%s sessions_revoked=%d",
-                stored.user_id,
-                stored.family_id,
-                revoked,
+                "refresh_token_reuse_detected",
+                extra={
+                    "user": user_ref(stored.user_id),
+                    "family_id": stored.family_id,
+                    "sessions_revoked": revoked,
+                },
             )
             raise InvalidToken
 
@@ -193,7 +196,9 @@ class AuthService:
     async def logout_all(self, *, user_id: uuid.UUID) -> int:
         revoked = await self._sessions.revoke_all_for_user(user_id, at=datetime.now(UTC))
         await self._session.commit()
-        logger.info("user_logged_out_all user_id=%s sessions_revoked=%d", user_id, revoked)
+        logger.info(
+            "user_logged_out_all", extra={"user": user_ref(user_id), "sessions_revoked": revoked}
+        )
         return revoked
 
     # --- Password reset ------------------------------------------------------
@@ -240,7 +245,7 @@ class AuthService:
                 ),
             )
         )
-        logger.info("password_reset_email_sent user_id=%s", user.id)
+        logger.info("password_reset_email_sent", extra={"user": user_ref(user.id)})
 
     async def reset_password(self, *, token: str, new_password: str) -> None:
         """Consume a reset token and set a new password.
@@ -264,7 +269,10 @@ class AuthService:
         revoked = await self._sessions.revoke_all_for_user(user.id, at=now)
 
         await self._session.commit()
-        logger.info("password_reset_completed user_id=%s sessions_revoked=%d", user.id, revoked)
+        logger.info(
+            "password_reset_completed",
+            extra={"user": user_ref(user.id), "sessions_revoked": revoked},
+        )
 
     # --- Internals -----------------------------------------------------------
 

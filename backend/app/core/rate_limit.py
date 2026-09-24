@@ -140,7 +140,7 @@ class RedisRateLimiter:
             )
         except RedisError:
             # The key names a client (an IP or user id); the bucket is enough.
-            logger.warning("rate_limit_degraded bucket=%s", key.split(":", 1)[0])
+            logger.warning("rate_limit_degraded", extra={"bucket": key.split(":", 1)[0]})
             return self._fallback.hit_now(key, limit=limit, window_seconds=window_seconds)
         if allowed:
             return RateLimitDecision(allowed=True, retry_after_seconds=0)

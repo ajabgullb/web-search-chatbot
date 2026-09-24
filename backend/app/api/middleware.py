@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 
@@ -11,7 +13,10 @@ from starlette.responses import Response
 from starlette.types import ASGIApp
 
 from app.core.config import Settings
+from app.core.logging import clear_log_context
 from app.core.request_context import set_request_id
+
+logger = logging.getLogger("app.http")
 
 RequestHandler = Callable[[Request], Awaitable[Response]]
 
@@ -23,8 +28,13 @@ REQUEST_ID_HEADER = "X-Request-ID"
 _CSP_EXEMPT_SUFFIXES = ("/docs", "/docs/oauth2-redirect", "/openapi.json")
 
 
+# Probes and scrapes arrive every few seconds; at INFO they would bury the
+# requests anyone is looking for.
+_QUIET_PATH_SUFFIXES = ("/health/live", "/health/ready", "/metrics")
+
+
 class RequestIdMiddleware(BaseHTTPMiddleware):
-    """Adopt the caller's request id or mint one, and echo it back.
+    """Adopt the caller's request id or mint one, echo it back, and log the request.
 
     Accepting an inbound id lets a trace span a proxy, the frontend, and the
     API. It is treated as an opaque label: it is length-capped and never
@@ -35,11 +45,31 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         incoming = request.headers.get(REQUEST_ID_HEADER, "").strip()
         request_id = incoming[:64] if incoming else str(uuid.uuid4())
 
+        clear_log_context()
         set_request_id(request_id)
         request.state.request_id = request_id
 
+        started = time.perf_counter()
         response = await call_next(request)
         response.headers[REQUEST_ID_HEADER] = request_id
+
+        path = request.url.path
+        level = logging.DEBUG if path.endswith(_QUIET_PATH_SUFFIXES) else logging.INFO
+        # For a stream this is time to the first byte, not the whole stream;
+        # a run's own duration is logged when it finishes.
+        logger.log(
+            level,
+            "http_request",
+            extra={
+                "method": request.method,
+                "path": path,
+                "status": response.status_code,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                # Set by the auth dependency, which runs in a child context
+                # this middleware cannot see.
+                "user": getattr(request.state, "user_ref", None),
+            },
+        )
         return response
 
 

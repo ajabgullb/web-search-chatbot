@@ -119,6 +119,32 @@ Clients switch on `code`. Stack traces, driver messages, and provider payloads
 never reach a client; unhandled exceptions are logged server-side and reported
 as `internal_error` with the request id the caller can quote.
 
+## Logging
+
+Logs are JSON, one object per line (`LOG_FORMAT=console` gives a readable
+line for local work). Each line has a stable `event` name and explicit
+fields. `app/core/logging.py` adds the correlation fields: `request_id`, an
+opaque `user` reference, and a run's `run_id` and `conversation_id`. The user
+reference is a truncated SHA-256 of the user id: log readers cannot turn it
+back into an account id, but someone holding an id can compute it and search.
+
+The policy is that nothing logs prompts, message bodies, search queries, page
+content, passwords, tokens, cookies, or authorization headers. Redaction is
+the safety net under it:
+
+- Fields named like secrets or content (`password`, `token`, `content`,
+  `snippet`, `query`, …) are written as `[REDACTED]` whatever they hold.
+- Messages and tracebacks are scrubbed of bearer tokens, JWTs, provider-key
+  shapes, `password=`-style pairs, and email addresses. This covers driver
+  errors such as a unique violation that echoes an email.
+
+Uvicorn's access log is replaced by one `http_request` line per request with
+method, path, status, and duration. Health probes and metric scrapes log at
+DEBUG. `httpx` and `openai` are held at WARNING, so provider URLs are not
+logged on every call. `tests/integration/test_log_hygiene.py` drives a whole
+session (register, login, refresh, a searched and cited run, logout) and
+fails if any credential or piece of content appears in the output.
+
 ## Authorization and data isolation
 
 Every conversation and message query is constrained by the authenticated
@@ -245,8 +271,7 @@ extends these checks; they are never relaxed to make an environment start.
 ## Not yet implemented
 
 Email verification (`is_verified` exists but is unused), CSP tuned to the
-frontend, distributed rate limits and cross-replica cancellation signals
-(Redis, Phase 8), log redaction filters, a request body size limit, and a purge
+frontend, a request body size limit, and a purge
 policy for soft-deleted conversations and their runs.
 
 ## Reporting

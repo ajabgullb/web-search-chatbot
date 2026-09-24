@@ -223,11 +223,7 @@ async def run_agent(
     except TimeoutError:
         # The deadline fired mid-graph, so finalize never ran. Build the result
         # here rather than leaving the caller to interpret a raised exception.
-        logger.warning(
-            "run_timeout run_id=%s seconds=%s",
-            context.run_id,
-            context.limits.run_timeout_seconds,
-        )
+        logger.warning("run_timeout", extra={"timeout_seconds": context.limits.run_timeout_seconds})
         return AgentResult(answer="", error=RUN_TIMEOUT_ERROR)
 
     assert result is not None  # stream_agent always ends with a result

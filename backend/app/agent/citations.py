@@ -89,7 +89,7 @@ def extract_citations(answer: str, sources: list[Source]) -> tuple[str, list[Cit
         lambda match: _resolve_marker(match.group(1), by_id, used, discarded), answer
     )
     if discarded:
-        logger.warning("citation_discarded count=%d labels=%s", len(discarded), discarded)
+        logger.warning("citation_discarded", extra={"count": len(discarded)})
 
     citations = [_make_citation(by_id[label], index) for index, label in enumerate(used, start=1)]
     return _tidy(cleaned), citations, discarded

@@ -48,6 +48,7 @@ from app.agent.events import (
     TextDelta,
 )
 from app.agent.graph import INTERNAL_ERROR, RUN_TIMEOUT_ERROR, AgentGraph, AgentResult, stream_agent
+from app.core.logging import bind_log_context
 from app.core.run_lock import RunLock
 from app.core.run_signals import CancelRequest, RedisCancelSignal
 from app.db.session import Database
@@ -203,7 +204,7 @@ class RunManager:
     def on_cancel_signal(self, request: CancelRequest) -> None:
         """A cancel broadcast by some replica, possibly this one."""
         if request.reason not in CANCEL_REASONS:
-            logger.warning("run_cancel_signal_ignored reason=%s", request.reason)
+            logger.warning("run_cancel_signal_ignored", extra={"reason": request.reason})
             return
         if request.run_id is not None:
             self.cancel(request.run_id, reason=request.reason)
@@ -235,7 +236,9 @@ class RunManager:
         while not handle.finished:
             idle = time.monotonic() - handle.last_observed
             if idle >= self.abandon_grace_seconds:
-                logger.info("run_abandoned run_id=%s idle_s=%.1f", handle.run_id, idle)
+                logger.info(
+                    "run_abandoned", extra={"run_id": handle.run_id, "idle_seconds": round(idle, 1)}
+                )
                 self.cancel(handle.run_id, reason="client_disconnected")
                 return
             await asyncio.sleep(self.abandon_grace_seconds - idle)
@@ -278,6 +281,9 @@ class RunManager:
         runtime: AgentRuntime,
         request_id: str | None,
     ) -> None:
+        # The task's copy of the request context: every line this run writes,
+        # down to the graph's nodes, carries these.
+        bind_log_context(run_id=str(run.id), conversation_id=str(run.conversation_id))
         started = time.monotonic()
         handle.publish(
             RunStartedEvent(
@@ -315,7 +321,7 @@ class RunManager:
                 raise
             except Exception:
                 # Never a raw exception to the client; the traceback stays here.
-                logger.exception("run_crashed run_id=%s", run.id)
+                logger.exception("run_crashed")
                 result = AgentResult(answer="", error=INTERNAL_ERROR)
 
             latency_ms = int((time.monotonic() - started) * 1000)
@@ -328,7 +334,7 @@ class RunManager:
                 # The database write itself failed. The run stays active until
                 # the stale sweep fails it; the client is told now rather than
                 # left with a stream that simply stops.
-                logger.exception("run_persist_failed run_id=%s", run.id)
+                logger.exception("run_persist_failed")
                 outcome = RunFailedEvent(
                     sequence=handle.next_sequence(),
                     run_id=run.id,
@@ -340,12 +346,17 @@ class RunManager:
                 )
             handle.publish(outcome)
             logger.info(
-                "run_finished run_id=%s status=%s duration_ms=%d searches=%d error=%s",
-                run.id,
-                outcome.type,
-                latency_ms,
-                result.search_count,
-                result.error["code"] if result.error else None,
+                "run_finished",
+                extra={
+                    "status": outcome.type,
+                    "duration_ms": latency_ms,
+                    "search_count": result.search_count,
+                    "error_code": result.error["code"] if result.error else None,
+                    "provider": run.provider,
+                    "model": result.model or run.model,
+                    "prompt_tokens": result.prompt_tokens,
+                    "completion_tokens": result.completion_tokens,
+                },
             )
         finally:
             handle.close()
@@ -374,7 +385,7 @@ class RunManager:
                     else:
                         handle.publish(self._to_public(handle, item))
         except TimeoutError:
-            logger.warning("run_timeout run_id=%s", context.run_id)
+            logger.warning("run_timeout")
             return AgentResult(answer="", error=RUN_TIMEOUT_ERROR)
         assert result is not None  # stream_agent always ends with a result
         return result
@@ -550,7 +561,7 @@ class RunManager:
                     completed_at=now,
                 )
             await session.commit()
-        logger.info("run_stopped run_id=%s reason=%s", run_id, reason)
+        logger.info("run_stopped", extra={"reason": reason})
         return await self._current_outcome(handle, run_id)
 
     async def _current_outcome(self, handle: RunHandle, run_id: uuid.UUID) -> RunEventModel:

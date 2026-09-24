@@ -22,6 +22,7 @@ from app.api.errors import (
     RateLimited,
 )
 from app.core.config import Settings
+from app.core.logging import bind_log_context, user_ref
 from app.core.rate_limit import RateLimiter
 from app.core.run_lock import RunLock
 from app.core.security import TokenError, decode_access_token
@@ -109,6 +110,7 @@ AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 
 
 async def get_current_user(
+    request: Request,
     session: SessionDep,
     settings: SettingsDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
@@ -133,6 +135,9 @@ async def get_current_user(
     if not user.is_active:
         raise AccountInactive
 
+    reference = user_ref(user.id)
+    bind_log_context(user=reference)
+    request.state.user_ref = reference
     return user
 
 

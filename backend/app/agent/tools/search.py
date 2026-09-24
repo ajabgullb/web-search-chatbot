@@ -261,12 +261,24 @@ async def execute_searches(
             except (SearchTransientError, TimeoutError) as exc:
                 if attempt == 2:
                     logger.warning(
-                        "search_failed reason=transient attempts=2 error=%s", type(exc).__name__
+                        "search_failed",
+                        extra={
+                            "reason": "transient",
+                            "attempts": 2,
+                            "error_type": type(exc).__name__,
+                        },
                     )
                     break
                 await asyncio.sleep(RETRY_BACKOFF_SECONDS)
             except SearchPermanentError as exc:
-                logger.warning("search_failed reason=permanent error=%s", type(exc).__name__)
+                logger.warning(
+                    "search_failed",
+                    extra={
+                        "reason": "permanent",
+                        "attempts": attempt,
+                        "error_type": type(exc).__name__,
+                    },
+                )
                 break
 
         outcome.executed_queries.append(query)

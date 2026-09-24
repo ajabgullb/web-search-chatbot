@@ -98,7 +98,8 @@ class RedisRunLock:
             # expires on its own, and the database index keeps things correct
             # meanwhile.
             logger.warning(
-                "run_lock_release_failed conversation_id=%s run_id=%s", conversation_id, run_id
+                "run_lock_release_failed",
+                extra={"conversation_id": conversation_id, "run_id": run_id},
             )
 
     async def holder(self, conversation_id: uuid.UUID) -> uuid.UUID | None:
