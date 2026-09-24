@@ -3,3 +3,5 @@ node_modules
 coverage
 src/api/generated
 package-lock.json
+test-results
+playwright-report

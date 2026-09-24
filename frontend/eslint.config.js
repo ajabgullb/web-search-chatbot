@@ -7,7 +7,16 @@ import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   // Generated API clients are never hand-edited, so never linted either.
-  { ignores: ['dist', 'node_modules', 'coverage', 'src/api/generated'] },
+  {
+    ignores: [
+      'dist',
+      'node_modules',
+      'coverage',
+      'src/api/generated',
+      'test-results',
+      'playwright-report',
+    ],
+  },
   js.configs.recommended,
 
   {
