@@ -56,9 +56,15 @@ make dev                  # builds and starts api, web, postgres, redis, mailpit
 
 If another project already uses one of those ports, change `POSTGRES_HOST_PORT`,
 `API_HOST_PORT`, `WEB_HOST_PORT`, `REDIS_HOST_PORT`, `MAILPIT_SMTP_HOST_PORT`, or
-`MAILPIT_UI_HOST_PORT` in `.env`. Keep the port in `DATABASE_URL` in step with
-`POSTGRES_HOST_PORT`, and the one in `REDIS_URL` in step with `REDIS_HOST_PORT`,
-since host tools connect through them.
+`MAILPIT_UI_HOST_PORT` in `.env`. Three settings contain a port and must follow
+the change:
+
+- `DATABASE_URL` must match `POSTGRES_HOST_PORT`, because host tools connect
+  through it.
+- `REDIS_URL` must match `REDIS_HOST_PORT`, for the same reason.
+- `FRONTEND_ORIGIN` must match `WEB_HOST_PORT`
+  (`http://localhost:<WEB_HOST_PORT>`). The API refuses session refreshes from
+  any other origin, so a mismatch signs you out on every reload.
 
 Verify the API is up:
 
