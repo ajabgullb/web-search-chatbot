@@ -29,9 +29,13 @@ export default defineConfig({
   },
   test: {
     // The committed API schema, handed to contract tests. Read here, in Node,
-    // because the dev server rightly refuses files outside the project.
+    // because the dev server rightly refuses files outside the project. Only
+    // under Vitest: in the Docker images only frontend/ exists, and the dev
+    // server and `vite build` load this same config.
     provide: {
-      openapiSchema: readFileSync(new URL('../openapi.json', import.meta.url), 'utf-8'),
+      openapiSchema: process.env.VITEST
+        ? readFileSync(new URL('../openapi.json', import.meta.url), 'utf-8')
+        : '',
     },
     globals: true,
     environment: 'jsdom',
