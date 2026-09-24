@@ -15,7 +15,7 @@ browser ──▶ frontend (Vite/React, nginx in production)
            backend (FastAPI, async)
                 │
                 ├── PostgreSQL   application data + LangGraph checkpoints
-                ├── Redis        run locks; rate limits, cancel flags (Phase 8)
+                ├── Redis        run locks, rate limits, cancel signals
                 ├── LLM provider  behind app/providers/llm.py
                 └── Search        behind app/providers/search.py
 ```
@@ -368,12 +368,17 @@ queue, so they are strictly increasing by construction. Internal events become
 wire events in exactly one function (`RunManager._to_public`), so nothing
 reaches a client that the mapping does not explicitly carry.
 
-**Cancellation** is cooperative and has two paths. In-process, the task is
-cancelled — stopping the model call at its next await — and records the
-outcome itself. The cancel endpoint then also marks the run cancelled in the
-database, conditioned on it still being active, which stops a run owned by
-another replica or a dead process: its executor finds the row no longer active
-and discards its result.
+**Cancellation** is cooperative and has three paths. In-process, the task is
+cancelled, stopping the model call at its next await, and it records the
+outcome itself. If the run is not local, the cancel is broadcast on the Redis
+channel `run-cancel` (`app/core/run_signals.py`), and the replica executing it
+cancels its task the same way. Conversation deletes are broadcast too. Either
+way, the cancel endpoint also marks the run cancelled in the database,
+conditioned on it still being active. That is the durable record: pub/sub is
+best effort, and a replica that missed the signal (or a dead process) finds the
+row no longer active and discards its result. A run already stopping ignores
+further cancels, so a second cancel cannot interrupt the shielded write that
+records the first.
 
 **Crash recovery.** A process that dies mid-run leaves a `running` row. No
 healthy run outlives `RUN_TIMEOUT_SECONDS`, so a run older than that plus

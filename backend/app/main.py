@@ -6,6 +6,8 @@ no request path ever builds an engine, HTTP client, or provider client.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -24,6 +26,7 @@ from app.core.logging import setup_logging
 from app.core.rate_limit import build_rate_limiter
 from app.core.redis import build_redis_client
 from app.core.run_lock import build_run_lock
+from app.core.run_signals import RedisCancelSignal
 from app.db.session import Database
 from app.providers.email import build_email_sender
 from app.providers.llm import build_llm_provider
@@ -50,11 +53,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.llm_provider = build_llm_provider(settings)
     app.state.search_provider = build_search_provider(settings)
     app.state.agent_limits = AgentLimits.from_settings(settings)
+    cancel_signal = RedisCancelSignal(app.state.redis) if app.state.redis is not None else None
     app.state.run_manager = RunManager(
         app.state.database,
         app.state.run_lock,
+        cancel_signal=cancel_signal,
         abandon_grace_seconds=settings.run_abandon_grace_seconds,
     )
+    app.state.cancel_signal = cancel_signal
 
     logger.info(
         "application startup: environment=%s redis=%s",
@@ -64,9 +70,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with AsyncExitStack() as stack:
         checkpointer = await stack.enter_async_context(checkpointer_for(settings))
         app.state.agent_graph = build_graph(checkpointer)
+        listener = (
+            asyncio.create_task(
+                cancel_signal.listen(app.state.run_manager.on_cancel_signal),
+                name="run-cancel-listener",
+            )
+            if cancel_signal is not None
+            else None
+        )
         try:
             yield
         finally:
+            if listener is not None:
+                listener.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await listener
             # Runs first: each records how it ended and releases its run lock,
             # which needs the database, the checkpointer, and Redis still open.
             await app.state.run_manager.shutdown()

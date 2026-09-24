@@ -83,8 +83,9 @@ async def delete_conversation(
 ) -> None:
     await service.delete(user=current_user, conversation_id=conversation_id)
     # An answer being written into a deleted conversation is work nobody can
-    # ever see; stop it.
+    # ever see; stop it, here and on whichever replica is writing it.
     manager.cancel_conversation(conversation_id, reason="conversation_deleted")
+    await manager.signal_cancel(reason="conversation_deleted", conversation_id=conversation_id)
 
 
 @router.get("/{conversation_id}/messages", response_model=Page[MessageRead])

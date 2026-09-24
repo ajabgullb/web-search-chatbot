@@ -19,10 +19,11 @@ guarantees at once:
 Each run has one producer (its task) and one queue, so sequence numbers are
 assigned in exactly one place and are strictly increasing by construction.
 
-The registry of live runs is per process. That is complete for one API process;
-with several replicas, cancelling a run executing elsewhere falls back to the
-database (see ``RunService.cancel``), and Phase 8 adds Redis for prompt
-cross-replica signalling.
+The registry of live runs is per process. With several replicas, a cancel that
+lands on a process not executing the run is recorded in the database (see
+``RunService.cancel``) and broadcast over Redis (:mod:`app.core.run_signals`),
+so the owning process cancels its task at once instead of finishing a model
+call nobody wants.
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ from app.agent.events import (
 )
 from app.agent.graph import INTERNAL_ERROR, RUN_TIMEOUT_ERROR, AgentGraph, AgentResult, stream_agent
 from app.core.run_lock import RunLock
+from app.core.run_signals import CancelRequest, RedisCancelSignal
 from app.db.session import Database
 from app.models.citation import Citation
 from app.models.message import Message, MessageRole, MessageStatus
@@ -134,10 +136,18 @@ class RunHandle:
 
 class RunManager:
     def __init__(
-        self, database: Database, run_lock: RunLock, *, abandon_grace_seconds: float = 10.0
+        self,
+        database: Database,
+        run_lock: RunLock,
+        *,
+        cancel_signal: RedisCancelSignal | None = None,
+        abandon_grace_seconds: float = 10.0,
     ) -> None:
         self._database = database
         self._run_lock = run_lock
+        # None with a single process: every run is local, so there is nobody
+        # to tell.
+        self._cancel_signal = cancel_signal
         self._active: dict[uuid.UUID, RunHandle] = {}
         # Public so a test can shorten it on a running app.
         self.abandon_grace_seconds = abandon_grace_seconds
@@ -167,11 +177,38 @@ class RunManager:
         handle = self._active.get(run_id)
         if handle is None or handle.task is None or handle.task.done():
             return None
-        # First reason wins: a user's stop followed by the tab closing is
-        # still a user stop.
-        handle.cancel_reason = handle.cancel_reason or reason
+        if handle.cancel_reason is not None:
+            # Already stopping. First reason wins (a user's stop followed by
+            # the tab closing is still a user stop), and a second
+            # ``task.cancel()`` would land inside the shielded write that
+            # records the stop, so the stream would lose its terminal event.
+            return handle
+        handle.cancel_reason = reason
         handle.task.cancel()
         return handle
+
+    async def signal_cancel(
+        self,
+        *,
+        reason: str,
+        run_id: uuid.UUID | None = None,
+        conversation_id: uuid.UUID | None = None,
+    ) -> None:
+        """Ask whichever process is executing the run(s) to stop them."""
+        if self._cancel_signal is not None:
+            await self._cancel_signal.publish(
+                CancelRequest(reason=reason, run_id=run_id, conversation_id=conversation_id)
+            )
+
+    def on_cancel_signal(self, request: CancelRequest) -> None:
+        """A cancel broadcast by some replica, possibly this one."""
+        if request.reason not in CANCEL_REASONS:
+            logger.warning("run_cancel_signal_ignored reason=%s", request.reason)
+            return
+        if request.run_id is not None:
+            self.cancel(request.run_id, reason=request.reason)
+        if request.conversation_id is not None:
+            self.cancel_conversation(request.conversation_id, reason=request.reason)
 
     def release(self, run_id: uuid.UUID) -> None:
         """The run's stream has gone; cancel unless someone reattaches in time.

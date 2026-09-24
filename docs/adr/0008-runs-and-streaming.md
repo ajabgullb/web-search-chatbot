@@ -92,8 +92,9 @@ a crash would lock the conversation forever behind the unique index.
   bill for tokens generated before the abort.
 - With several replicas, a user's cancel reaches a run on another replica only
   through the database, so that replica stops at the end of the model call
-  rather than immediately. Phase 8's Redis signal closes the gap.
-- The per-user run rate limit is in-process until Phase 8.
+  rather than immediately. Phase 8 closed this gap with a Redis pub/sub cancel
+  signal; the database stays the durable record.
+- The per-user run rate limit was in-process until Phase 8 moved it to Redis.
 - Resumable streams (`Last-Event-ID`) are not supported; recovery is
   `GET /runs/{id}` plus message history, as §8 allows.
 - `LLMProvider` exposes `stream` and `structured`; `complete` was removed rather

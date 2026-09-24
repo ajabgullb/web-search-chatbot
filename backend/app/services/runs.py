@@ -368,6 +368,9 @@ class RunService:
         handle = manager.cancel(run_id, reason="user_cancelled")
         if handle is not None:
             await manager.wait(handle, grace_seconds=CANCEL_WAIT_SECONDS)
+        else:
+            # Executing on another replica, if anywhere: tell it to stop now.
+            await manager.signal_cancel(reason="user_cancelled", run_id=run_id)
 
         await self._runs.finish(
             run_id=run_id,
