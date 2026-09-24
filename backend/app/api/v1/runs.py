@@ -20,6 +20,7 @@ from app.api.dependencies import (
     SettingsDep,
     enforce_run_rate_limit,
 )
+from app.api.errors import ServiceUnavailable
 from app.api.sse import EventStreamResponse, live_events, replayed_events
 from app.models.run import RunStatus
 from app.schemas.message import MessageRead
@@ -153,6 +154,12 @@ async def create_run(
     ],
 ) -> Response:
     """Send a message (or retry the latest one) and stream the answer."""
+    if not manager.accepting:
+        # Shutting down: finish what is running, start nothing. The client
+        # retries and lands on a healthy replica.
+        raise ServiceUnavailable(
+            "The server is restarting. Try again in a moment.", headers={"Retry-After": "5"}
+        )
     outcome = await service.create(
         user=current_user,
         conversation_id=conversation_id,

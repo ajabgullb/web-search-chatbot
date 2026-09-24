@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Response, status
 
-from app.api.dependencies import DatabaseDep, RedisDep
+from app.api.dependencies import DatabaseDep, RedisDep, RunManagerDep
 from app.core.redis import ping
 from app.schemas.health import LivenessResponse, ReadinessResponse
 
@@ -27,8 +27,11 @@ async def live() -> LivenessResponse:
     response_model=ReadinessResponse,
     responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ReadinessResponse}},
 )
-async def ready(database: DatabaseDep, redis: RedisDep, response: Response) -> ReadinessResponse:
-    checks = {"database": await database.check_connection()}
+async def ready(
+    database: DatabaseDep, redis: RedisDep, manager: RunManagerDep, response: Response
+) -> ReadinessResponse:
+    # A draining process is healthy but must not be sent new work.
+    checks = {"database": await database.check_connection(), "accepting_work": manager.accepting}
     # Only when configured: in development Redis is optional, and an absent
     # optional dependency is not a reason to refuse traffic.
     if redis is not None:

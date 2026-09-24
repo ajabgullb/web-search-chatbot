@@ -383,9 +383,19 @@ records the first.
 **Crash recovery.** A process that dies mid-run leaves a `running` row. No
 healthy run outlives `RUN_TIMEOUT_SECONDS`, so a run older than that plus
 `RUN_STALE_GRACE_SECONDS` is presumed dead and failed as `run_interrupted`
-(retryable) the next time its conversation is used or the run is polled. On a
-clean shutdown the lifespan stops every run before the pool closes, recording
-each as `run_interrupted`.
+(retryable) the next time its conversation is used or the run is polled.
+
+**Graceful shutdown.** On SIGTERM, uvicorn closes its listener and lets open
+responses finish, run streams included, for up to `--timeout-graceful-shutdown`
+(100 s in the production image, longer than the 90 s run deadline). The
+lifespan then runs `RunManager.shutdown`. It stops accepting runs (new
+submissions get `503` with `Retry-After`, and readiness reports
+`accepting_work: false`). It waits up to `SHUTDOWN_DRAIN_SECONDS` for runs with
+no open stream, such as a reloaded page that is polling, and only then cancels
+what is left, recording it as `run_interrupted` (retryable). The shutdown
+releases run locks before it closes Redis and the database pool.
+`tests/integration/test_graceful_shutdown.py` runs a real uvicorn server and
+checks that a stream open at shutdown still delivers the whole answer.
 
 | Outcome | Run status | Assistant message | Terminal event |
 | --- | --- | --- | --- |

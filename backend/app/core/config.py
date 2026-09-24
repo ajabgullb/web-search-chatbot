@@ -141,6 +141,11 @@ class Settings(BaseSettings):
     # Long enough for a page reload to reconnect via GET /runs/{id}; short
     # enough that a closed tab stops spending almost at once.
     run_abandon_grace_seconds: float = 10.0
+    # On shutdown, how long in-flight runs may keep going before they are
+    # stopped and recorded as interrupted (retryable). Uvicorn has usually
+    # drained runs with an open stream before this starts; this covers runs
+    # whose client is reconnecting through GET /runs/{id}.
+    shutdown_drain_seconds: float = 10.0
 
     # --- LLM provider ---
     # One OpenAI-compatible implementation covers OpenAI, OpenRouter, Groq, and

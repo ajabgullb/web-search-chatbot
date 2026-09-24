@@ -11,7 +11,10 @@ pytestmark = pytest.mark.integration
 async def test_readiness_reports_ready(client: AsyncClient) -> None:
     response = await client.get("/api/v1/health/ready")
     assert response.status_code == 200
-    assert response.json() == {"status": "ready", "checks": {"database": True}}
+    assert response.json() == {
+        "status": "ready",
+        "checks": {"database": True, "accepting_work": True},
+    }
 
 
 async def test_liveness_reports_ok(client: AsyncClient) -> None:

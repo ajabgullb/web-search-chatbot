@@ -361,7 +361,8 @@ async def test_an_answer_the_model_finished_survives_a_dropped_stream(
     assert [m["content"] for m in history.json()["items"]] == ["hi", "The complete answer."]
 
 
-async def test_shutdown_fails_in_flight_runs_as_retryable(settings: Settings) -> None:
+async def test_shutdown_fails_runs_that_outlast_the_drain_window(settings: Settings) -> None:
+    settings.shutdown_drain_seconds = 0.2
     app = create_app(settings)
     async with LifespanManager(
         app, startup_timeout=LIFESPAN_TIMEOUT_SECONDS, shutdown_timeout=LIFESPAN_TIMEOUT_SECONDS

@@ -44,4 +44,9 @@ EXPOSE 8000
 # urllib keeps the image free of a curl dependency just for the probe.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/live', timeout=4).status == 200 else 1)"
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# On SIGTERM uvicorn stops accepting connections and lets open responses
+# finish. 100 s covers a run started just before the signal (90 s deadline)
+# plus its final write; the orchestrator's stop grace period must be longer.
+# --no-server-header: the server's version is nobody's business.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--timeout-graceful-shutdown", "100", "--no-server-header"]

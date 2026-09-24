@@ -224,4 +224,4 @@ class TestRedisSpecifics:
         down = await client.get("/api/v1/health/ready")
 
         assert down.status_code == 503
-        assert down.json()["checks"] == {"database": True, "redis": False}
+        assert down.json()["checks"] == {"database": True, "accepting_work": True, "redis": False}

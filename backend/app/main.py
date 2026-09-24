@@ -91,7 +91,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     await listener
             # Runs first: each records how it ended and releases its run lock,
             # which needs the database, the checkpointer, and Redis still open.
-            await app.state.run_manager.shutdown()
+            # Read at shutdown, not startup, so an operator (or a test) can
+            # change it on a running app.
+            await app.state.run_manager.shutdown(
+                drain_seconds=app.state.settings.shutdown_drain_seconds
+            )
             await app.state.search_provider.aclose()
             if app.state.redis is not None:
                 await app.state.redis.aclose()

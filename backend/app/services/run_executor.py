@@ -152,6 +152,9 @@ class RunManager:
         # None with a single process: every run is local, so there is nobody
         # to tell.
         self._cancel_signal = cancel_signal
+        # False once shutdown begins: new runs are refused (503) so a draining
+        # process only finishes work, never starts it.
+        self.accepting = True
         self._active: dict[uuid.UUID, RunHandle] = {}
         # Public so a test can shorten it on a running app.
         self.abandon_grace_seconds = abandon_grace_seconds
@@ -259,20 +262,30 @@ class RunManager:
     def is_active(self, run_id: uuid.UUID) -> bool:
         return run_id in self._active
 
-    async def shutdown(self) -> None:
-        """Stop every run and let each record how it ended.
+    async def shutdown(self, *, drain_seconds: float = 0.0) -> None:
+        """Finish what is in flight if it fits in ``drain_seconds``, then stop the rest.
 
-        Graceful draining — finishing in-flight answers before exit — is Phase
-        8. Until then a shutdown fails its runs as retryable rather than
-        leaving them ``running`` for the stale sweep to find.
+        A run that finishes in the window is answered and saved as usual. A run
+        still going at the end is cancelled and recorded as ``run_interrupted``
+        (retryable), not left ``running`` for the stale sweep to find, so its
+        client learns at once that it should retry.
         """
-        tasks = []
+        self.accepting = False
+        in_flight = [h.task for h in self._active.values() if h.task is not None]
+        if in_flight and drain_seconds > 0:
+            logger.info(
+                "runs_draining", extra={"count": len(in_flight), "drain_seconds": drain_seconds}
+            )
+            await asyncio.wait(in_flight, timeout=drain_seconds)
+
+        stopping = []
         for handle in list(self._active.values()):
             self.cancel(handle.run_id, reason="server_shutdown")
             if handle.task is not None:
-                tasks.append(handle.task)
-        if tasks:
-            await asyncio.wait(tasks, timeout=SHUTDOWN_GRACE_SECONDS)
+                stopping.append(handle.task)
+        if stopping:
+            logger.warning("runs_interrupted_by_shutdown", extra={"count": len(stopping)})
+            await asyncio.wait(stopping, timeout=SHUTDOWN_GRACE_SECONDS)
 
     # --- execution --------------------------------------------------------
 
