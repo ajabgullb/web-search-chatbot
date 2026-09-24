@@ -11,7 +11,7 @@ COMPOSE := docker compose
 .PHONY: help dev rebuild down logs up-db check-db install migrate migration downgrade \
         test test-backend test-frontend e2e lint lint-backend lint-frontend \
         format format-check typecheck typecheck-backend typecheck-frontend \
-        openapi generate-client clean
+        openapi generate-client clean prod-up prod-down prod-logs
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -43,6 +43,20 @@ check-db: ## Check that the database in DATABASE_URL is reachable
 install: ## Install backend and frontend dependencies from lockfiles
 	cd $(BACKEND) && uv sync --frozen
 	cd $(FRONTEND) && npm ci
+
+# Production-shaped stack. Always passes --env-file: without it Compose would
+# fall back to the development .env for interpolation.
+PROD_COMPOSE := $(COMPOSE) --env-file .env.production -f compose.prod.yaml
+
+prod-up: ## Build and start the production stack from .env.production
+	@test -f .env.production || { echo "copy .env.production.example to .env.production and fill it in"; exit 1; }
+	$(PROD_COMPOSE) up -d --build --wait
+
+prod-down: ## Stop the production stack (data volumes are kept)
+	$(PROD_COMPOSE) down
+
+prod-logs: ## Follow production stack logs
+	$(PROD_COMPOSE) logs -f
 
 # --- Database ----------------------------------------------------------------
 

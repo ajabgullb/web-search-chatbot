@@ -35,8 +35,10 @@ _log_context: ContextVar[dict[str, Any] | None] = ContextVar("log_context", defa
 REDACTED = "[REDACTED]"
 
 # Attributes every LogRecord has; anything else on a record came from `extra`.
+# Uvicorn adds `color_message`, a copy of the message with terminal escapes.
 _RECORD_ATTRIBUTES = frozenset(
-    vars(logging.LogRecord("", 0, "", 0, "", None, None)).keys() | {"message", "asctime"}
+    vars(logging.LogRecord("", 0, "", 0, "", None, None)).keys()
+    | {"message", "asctime", "color_message"}
 )
 
 # Field names whose values are never written, whatever they contain.

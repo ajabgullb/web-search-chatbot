@@ -1,6 +1,6 @@
 # Architecture
 
-Status: reflects Phase 5 (agent core). Updated as each phase lands — see
+Status: reflects Phase 8 (production hardening). Updated as each phase lands — see
 [`PLAN.md`](../PLAN.md) for what is coming and [`AGENTS.md`](../AGENTS.md) for
 the contract this implements.
 

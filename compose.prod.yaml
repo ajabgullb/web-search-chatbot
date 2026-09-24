@@ -1,0 +1,120 @@
+# Production-shaped stack: the images that ship, production settings, and
+# migrations run once as their own job.
+#
+#   cp .env.production.example .env.production   # fill in every value
+#   docker compose --env-file .env.production -f compose.prod.yaml up -d --build
+#
+# Only the web container publishes a port. It serves the SPA and proxies /api
+# to the API, which is reachable only on the internal network. TLS is
+# terminated in front of this stack (a load balancer, Caddy, Traefik, ...),
+# which forwards plain HTTP to WEB_HOST_PORT with X-Forwarded-Proto: https.
+#
+# Required values use ${VAR:?}, so Compose refuses to start and names the
+# missing one before any container runs. The API then checks the rest
+# (strength, https, TLS for SMTP) and refuses to boot on anything unsafe.
+name: web-search-chatbot-prod
+
+# One definition of the API's environment, shared by the API and the
+# migration job: both load the same validated settings.
+x-api-environment: &api-environment
+  ENVIRONMENT: production
+  APP_NAME: ${APP_NAME:-Web Search Chatbot}
+  FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?set FRONTEND_ORIGIN to the public https origin}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-app}
+  REDIS_URL: redis://redis:6379/0
+  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (48+ random characters)}
+  JWT_ISSUER: ${JWT_ISSUER:-web-search-chatbot}
+  JWT_AUDIENCE: ${JWT_AUDIENCE:-web-search-chatbot-api}
+  LLM_PROVIDER: openai_compatible
+  LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+  LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+  LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY}
+  SEARCH_PROVIDER: tavily
+  SEARCH_API_KEY: ${SEARCH_API_KEY:?set SEARCH_API_KEY}
+  SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
+  EMAIL_FROM: ${EMAIL_FROM:?set EMAIL_FROM}
+  METRICS_TOKEN: ${METRICS_TOKEN:-}
+  LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+  LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+  LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-web-search-chatbot}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_FORMAT: json
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    # Locks, rate-limit windows, and cancel signals are all short-lived, and
+    # the database guards correctness if they are lost, so no persistence.
+    image: redis:7-alpine
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    # A release job: runs once, before any API replica starts, and exits.
+    # Running `alembic upgrade head` from every replica at boot would race.
+    build:
+      context: ./backend
+      target: runtime
+    image: web-search-chatbot-api:latest
+    command: ['alembic', 'upgrade', 'head']
+    environment: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    image: web-search-chatbot-api:latest
+    environment:
+      <<: *api-environment
+      # Trust X-Forwarded-For from any peer. Safe only because the API
+      # publishes no port: the web container is the one peer that can reach
+      # it. Real client IPs are what the per-IP rate limits key on.
+      FORWARDED_ALLOW_IPS: '*'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    # Longer than the image's 100 s graceful timeout, so a stop drains
+    # in-flight answers instead of killing them.
+    stop_grace_period: 120s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      target: runtime
+    ports:
+      - '${WEB_HOST_PORT:-8080}:8080'
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

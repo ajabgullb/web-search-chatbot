@@ -97,6 +97,39 @@ make generate-client  # regenerate ./openapi.json and the typed frontend client
 make down         # stop the stack
 ```
 
+## Running in production
+
+`compose.prod.yaml` runs the images that ship, with production settings:
+
+```bash
+cp .env.production.example .env.production   # fill in every value
+make prod-up                                 # build, migrate, start, wait until healthy
+make prod-logs
+make prod-down                               # data volumes are kept
+```
+
+- **One public port.** `web` (nginx) serves the SPA and proxies `/api` to the
+  API, which publishes no port. Terminate TLS in front of the stack (a load
+  balancer, Caddy, or Traefik) and forward to `WEB_HOST_PORT` with
+  `X-Forwarded-Proto: https`. nginx then adds HSTS.
+- **Migrations run once**, as the `migrate` job. The API starts only after it
+  has exited successfully, and replicas never race to migrate.
+- **The configuration fails closed at two levels.** Compose refuses to start
+  and names any missing required value. The API then refuses to boot on weak
+  or unsafe settings: see `docs/security.md`. Always pass
+  `--env-file .env.production` (the `make` targets do). Without it, Compose
+  falls back to the development `.env`.
+- **Stopping drains.** The API has a 100 s graceful timeout and a 120 s stop
+  grace period, so answers in progress finish. New runs get `503` until the
+  process exits.
+- **Observability.** JSON logs go to stdout. Prometheus scrapes
+  `/api/v1/metrics` with `Authorization: Bearer $METRICS_TOKEN`; without a
+  token the endpoint does not exist. LangSmith tracing is optional and never
+  uploads content.
+
+Both images run as non-root users, carry health checks, and contain no
+secrets. Everything sensitive arrives through the environment at run time.
+
 ## Layout
 
 ```
@@ -104,6 +137,7 @@ backend/    FastAPI app (app/), Alembic migrations, tests
 frontend/   Vite + React app (src/), Playwright e2e (tests/e2e)
 docs/       architecture, API, security, ADRs
 compose.yaml  local development stack
+compose.prod.yaml  production-shaped stack (see "Running in production")
 Makefile      task runner
 openapi.json  committed API schema; the frontend client is generated from it
 ```
@@ -113,7 +147,10 @@ openapi.json  committed API schema; the frontend client is generated from it
 - Every schema change ships an Alembic migration **and** a working downgrade.
 - Route handlers stay thin: validate, call a service, map the result. SQL lives
   in repositories, orchestration in services, agent behaviour in `app/agent`.
-- `app/core/config.py` is the only place that reads the environment.
+- `app/core/config.py` is the only place that reads the environment. (The one
+  write is `app/agent/tracing.py` switching off LangChain's implicit tracing.)
+- Log with an event name and explicit fields, never interpolated values:
+  `logger.info("run_accepted", extra={"retry": False})`. Never log content.
 - Auth tokens never touch `localStorage` — ESLint enforces it.
 - `Settings` is resolved from `app.state`, never from the cached global, so an
   app is always governed by the settings it was constructed with.
