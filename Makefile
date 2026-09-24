@@ -11,7 +11,7 @@ COMPOSE := docker compose
 .PHONY: help dev rebuild down logs up-db check-db install migrate migration downgrade \
         test test-backend test-frontend e2e lint lint-backend lint-frontend \
         format format-check typecheck typecheck-backend typecheck-frontend \
-        openapi generate-client clean prod-up prod-down prod-logs eval eval-live
+        openapi generate-client clean prod-up prod-down prod-logs eval eval-live e2e-install
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -80,8 +80,11 @@ test-backend: check-db ## Run pytest
 test-frontend: ## Run Vitest
 	cd $(FRONTEND) && npm test
 
-e2e: ## Run Playwright end-to-end tests (wired up in Phase 9)
-	@echo "Playwright is set up in Phase 9 -- see PLAN.md."
+e2e: check-db ## Run Playwright end-to-end tests (real app, scripted LLM and search)
+	cd $(FRONTEND) && npx playwright test
+
+e2e-install: ## Download the Chromium build Playwright drives (once per machine)
+	cd $(FRONTEND) && npx playwright install chromium
 
 eval: ## Run the deterministic agent evals (free; what CI gates on)
 	cd $(BACKEND) && uv run python -m evals.run --subset ci
