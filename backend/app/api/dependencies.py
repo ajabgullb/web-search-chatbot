@@ -21,6 +21,7 @@ from app.api.errors import (
     OriginNotAllowed,
     RateLimited,
 )
+from app.core import telemetry
 from app.core.config import Settings
 from app.core.logging import bind_log_context, user_ref
 from app.core.rate_limit import RateLimiter
@@ -199,6 +200,7 @@ async def enforce_run_rate_limit(
         window_seconds=settings.rate_limit_runs_window_seconds,
     )
     if not decision.allowed:
+        telemetry.record_rate_limited("runs")
         raise RateLimited(
             headers={"Retry-After": str(decision.retry_after_seconds)},
             details={"retry_after_seconds": decision.retry_after_seconds},
@@ -245,6 +247,7 @@ def rate_limit(bucket: str, limit_attribute: str) -> DependsMarker:
             window_seconds=settings.rate_limit_window_seconds,
         )
         if not decision.allowed:
+            telemetry.record_rate_limited(bucket)
             raise RateLimited(
                 headers={"Retry-After": str(decision.retry_after_seconds)},
                 details={"retry_after_seconds": decision.retry_after_seconds},

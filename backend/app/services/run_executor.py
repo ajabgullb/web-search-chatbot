@@ -48,6 +48,7 @@ from app.agent.events import (
     TextDelta,
 )
 from app.agent.graph import INTERNAL_ERROR, RUN_TIMEOUT_ERROR, AgentGraph, AgentResult, stream_agent
+from app.core import telemetry
 from app.core.logging import bind_log_context
 from app.core.run_lock import RunLock
 from app.core.run_signals import CancelRequest, RedisCancelSignal
@@ -117,6 +118,8 @@ class RunHandle:
     # recovery endpoint. Read only once the stream has gone.
     last_observed: float = field(default_factory=time.monotonic)
     abandonment_watch: asyncio.Task[None] | None = None
+    started: float = field(default_factory=time.monotonic)
+    first_text_sent: bool = False
     _sequence: int = 0
 
     def next_sequence(self) -> int:
@@ -299,7 +302,9 @@ class RunManager:
                 if history is None:
                     # Cancelled before it started (another replica, or the
                     # stale sweep). Report whatever the database now says.
-                    handle.publish(await self._current_outcome(handle, run.id))
+                    outcome_event = await self._current_outcome(handle, run.id)
+                    handle.publish(outcome_event)
+                    telemetry.record_run(outcome_event.type, time.monotonic() - started)
                     return
 
                 context = AgentContext(
@@ -318,6 +323,7 @@ class RunManager:
                 # the write that records the cancellation would be cancelled too.
                 event = await asyncio.shield(self._record_stop(handle, run.id, reason))
                 handle.publish(event)
+                telemetry.record_run(event.type, time.monotonic() - started)
                 raise
             except Exception:
                 # Never a raw exception to the client; the traceback stays here.
@@ -358,6 +364,12 @@ class RunManager:
                     "completion_tokens": result.completion_tokens,
                 },
             )
+            telemetry.record_run(
+                outcome.type,
+                latency_ms / 1000,
+                prompt_tokens=result.prompt_tokens,
+                completion_tokens=result.completion_tokens,
+            )
         finally:
             handle.close()
             self._active.pop(run.id, None)
@@ -383,7 +395,11 @@ class RunManager:
                     if isinstance(item, AgentResult):
                         result = item
                     else:
-                        handle.publish(self._to_public(handle, item))
+                        public = self._to_public(handle, item)
+                        if public.type == "message.delta" and not handle.first_text_sent:
+                            handle.first_text_sent = True
+                            telemetry.TIME_TO_FIRST_TOKEN.observe(time.monotonic() - handle.started)
+                        handle.publish(public)
         except TimeoutError:
             logger.warning("run_timeout")
             return AgentResult(answer="", error=RUN_TIMEOUT_ERROR)

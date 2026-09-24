@@ -25,6 +25,7 @@ from collections.abc import AsyncIterator, Callable, Iterable
 
 from starlette.responses import StreamingResponse
 
+from app.core import telemetry
 from app.schemas.runs import RunEventModel
 from app.services.run_executor import RunHandle
 
@@ -70,6 +71,7 @@ async def live_events(
     failed write ends it too. Either way ``finally`` runs, and the run is
     cancelled rather than left to spend budget on an answer nobody receives.
     """
+    telemetry.ACTIVE_STREAMS.inc()
     try:
         while True:
             try:
@@ -82,6 +84,7 @@ async def live_events(
                 return
             yield encode_event(event)
     finally:
+        telemetry.ACTIVE_STREAMS.dec()
         if not handle.finished:
             on_abandoned()
 

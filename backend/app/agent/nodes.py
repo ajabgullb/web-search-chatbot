@@ -30,6 +30,7 @@ from app.agent.prompts import (
 from app.agent.routing import SearchDecision, heuristic_search_decision
 from app.agent.state import AgentState, Citation, RunError, Source, trim_history
 from app.agent.tools.search import execute_searches, validate_queries
+from app.core import telemetry
 from app.providers.llm import LLMError, LLMTransientError
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ def _last_user_message(messages: list[AnyMessage]) -> str:
 
 
 def _llm_error(exc: LLMError) -> RunError:
+    telemetry.record_llm_failure("transient" if isinstance(exc, LLMTransientError) else "permanent")
     return RunError(
         code="llm_unavailable",
         message="The language model is unavailable. Please try again.",
@@ -136,6 +138,9 @@ async def decide_search(state: AgentState, runtime: Runtime[AgentContext]) -> Ag
         # The classifier is not worth failing the run over. Answering directly
         # is the cheaper wrong answer: it spends no search budget, and if the
         # model is genuinely down the answer node will report it properly.
+        telemetry.record_llm_failure(
+            "transient" if isinstance(exc, LLMTransientError) else "permanent"
+        )
         logger.warning("search_decision_failed", extra={"error_type": type(exc).__name__})
         return AgentState(
             search_decision=False,

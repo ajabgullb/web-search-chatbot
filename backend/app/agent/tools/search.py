@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -22,6 +23,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from app.agent.context import AgentLimits
 from app.agent.events import AgentEvent, SearchCompleted, SearchStarted
 from app.agent.state import Source
+from app.core import telemetry
 from app.providers.search import (
     SearchHit,
     SearchPermanentError,
@@ -254,11 +256,17 @@ async def execute_searches(
         report(SearchStarted(query=query))
         hits: list[SearchHit] | None = None
         for attempt in (1, 2):
+            call_started = time.monotonic()
             try:
                 async with asyncio.timeout(limits.search_timeout_seconds):
                     hits = await provider.search(query, max_results=limits.max_results_per_search)
+                telemetry.record_search("ok", time.monotonic() - call_started)
                 break
             except (SearchTransientError, TimeoutError) as exc:
+                telemetry.record_search(
+                    "timeout" if isinstance(exc, TimeoutError) else "transient_error",
+                    time.monotonic() - call_started,
+                )
                 if attempt == 2:
                     logger.warning(
                         "search_failed",
@@ -271,6 +279,7 @@ async def execute_searches(
                     break
                 await asyncio.sleep(RETRY_BACKOFF_SECONDS)
             except SearchPermanentError as exc:
+                telemetry.record_search("permanent_error", time.monotonic() - call_started)
                 logger.warning(
                     "search_failed",
                     extra={

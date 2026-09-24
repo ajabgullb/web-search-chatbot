@@ -105,6 +105,11 @@ class Settings(BaseSettings):
     # database still guards correctness while Redis is away.
     redis_timeout_seconds: float = 2.0
 
+    # --- Observability ---
+    # Bearer token a Prometheus scraper must present at /metrics. Empty in
+    # production closes the endpoint; empty in development leaves it open.
+    metrics_token: str = ""
+
     # --- Conversation and agent budgets ---
     # Enforced by the run service. The composer shows a live counter against
     # the same value, so the client never invents a limit of its own.
@@ -207,6 +212,8 @@ class Settings(BaseSettings):
         # would coordinate only with itself.
         if not self.redis_url:
             problems.append("REDIS_URL is required in production")
+        if self.metrics_token and len(self.metrics_token) < 32:
+            problems.append("METRICS_TOKEN must be at least 32 characters when set")
         if problems:
             raise ValueError("Invalid production configuration: " + "; ".join(problems))
         return self

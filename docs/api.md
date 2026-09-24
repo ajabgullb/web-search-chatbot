@@ -47,6 +47,29 @@ the same body shape. `redis` appears only when `REDIS_URL` is configured
 { "status": "ready", "checks": { "database": true, "redis": true } }
 ```
 
+### `GET /api/v1/metrics`
+
+Prometheus text format. Not in the OpenAPI schema: it is an operator
+interface. In development it is open. If `METRICS_TOKEN` is set, the scraper
+must send `Authorization: Bearer <token>` (otherwise `401`). In production
+without a token the endpoint answers `404`, and metrics should be collected
+over an isolated network path.
+
+| Series | Type | Labels |
+| --- | --- | --- |
+| `http_requests_total`, `http_request_duration_seconds` | counter, histogram | `method`, `route` (template), `status` |
+| `active_streams` | gauge | |
+| `runs_total`, `run_duration_seconds` | counter, histogram | `outcome` (`completed`, `failed`, `cancelled`) |
+| `run_time_to_first_token_seconds` | histogram | |
+| `llm_tokens_total` | counter | `kind` (`prompt`, `completion`) |
+| `search_requests_total`, `search_request_duration_seconds` | counter, histogram | `outcome` (`ok`, `transient_error`, `timeout`, `permanent_error`) |
+| `provider_failures_total` | counter | `provider` (`llm`, `search`), `kind` |
+| `rate_limit_hits_total` | counter | `bucket` (`login`, `register`, `forgot_password`, `runs`) |
+| `db_pool_connections_in_use`, `db_pool_connections_max`, `db_pool_saturation_ratio` | gauge | |
+
+Labels only take values from small fixed sets. Ids and user input never
+become labels, because each distinct value creates a new time series.
+
 ## Authentication
 
 Send the access token as `Authorization: Bearer <token>`. The refresh token is

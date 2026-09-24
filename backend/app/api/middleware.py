@@ -12,6 +12,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
+from app.core import telemetry
 from app.core.config import Settings
 from app.core.logging import clear_log_context
 from app.core.request_context import set_request_id
@@ -53,7 +54,13 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers[REQUEST_ID_HEADER] = request_id
 
+        duration = time.perf_counter() - started
         path = request.url.path
+        # The route template, not the path: one series per endpoint rather
+        # than one per conversation id. Unmatched paths (scanners probing for
+        # /wp-admin) share a single label.
+        route = getattr(request.scope.get("route"), "path", None) or "unmatched"
+        telemetry.record_http(request.method, route, response.status_code, duration)
         level = logging.DEBUG if path.endswith(_QUIET_PATH_SUFFIXES) else logging.INFO
         # For a stream this is time to the first byte, not the whole stream;
         # a run's own duration is logged when it finishes.
@@ -64,7 +71,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
                 "method": request.method,
                 "path": path,
                 "status": response.status_code,
-                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                "duration_ms": round(duration * 1000, 1),
                 # Set by the auth dependency, which runs in a child context
                 # this middleware cannot see.
                 "user": getattr(request.state, "user_ref", None),
