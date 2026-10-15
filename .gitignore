@@ -24,6 +24,9 @@ frontend/.vite/
 *.tsbuildinfo
 npm-debug.log*
 
+# Production database dumps (compose.prod.yaml backup service)
+backups/
+
 # Playwright
 test-results/
 playwright-report/

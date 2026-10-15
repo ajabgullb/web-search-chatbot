@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.conversation import Conversation
@@ -61,6 +61,22 @@ class RunRepository:
             .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
+
+    async def count_started_since(
+        self, *, user_id: uuid.UUID, since: datetime
+    ) -> tuple[int, datetime | None]:
+        """How many runs the user started after ``since``, and the oldest one's time.
+
+        Deleted conversations are deliberately *not* excluded: deleting a
+        thread must not hand back the budget its answers already spent.
+        """
+        result = await self._session.execute(
+            select(func.count(), func.min(Run.created_at)).where(
+                Run.user_id == user_id, Run.created_at > since
+            )
+        )
+        count, oldest = result.one()
+        return int(count), oldest
 
     async def get_active(self, *, conversation_id: uuid.UUID) -> Run | None:
         result = await self._session.execute(

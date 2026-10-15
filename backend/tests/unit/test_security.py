@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -12,7 +14,9 @@ from app.core.config import Environment, Settings
 from app.core.security import (
     TokenError,
     create_access_token,
+    create_email_verification_token,
     decode_access_token,
+    decode_email_verification_token,
     generate_opaque_token,
     hash_opaque_token,
     hash_password,
@@ -31,34 +35,67 @@ def settings() -> Settings:
 # --- Passwords ---------------------------------------------------------------
 
 
-def test_hashing_is_salted_and_verifiable() -> None:
+async def test_hashing_is_salted_and_verifiable() -> None:
     password = "correct-horse-battery-staple"
-    first = hash_password(password)
-    second = hash_password(password)
+    first = await hash_password(password)
+    second = await hash_password(password)
 
     assert first != second, "each hash must carry its own salt"
-    assert verify_password(password, first)
-    assert verify_password(password, second)
+    assert await verify_password(password, first)
+    assert await verify_password(password, second)
 
 
-def test_hash_is_argon2id() -> None:
-    assert hash_password("correct-horse-battery-staple").startswith("$argon2id$")
+async def test_hash_is_argon2id() -> None:
+    assert (await hash_password("correct-horse-battery-staple")).startswith("$argon2id$")
 
 
-def test_wrong_password_returns_false_rather_than_raising() -> None:
-    assert verify_password("nope", hash_password("correct-horse-battery-staple")) is False
+async def test_wrong_password_returns_false_rather_than_raising() -> None:
+    stored = await hash_password("correct-horse-battery-staple")
+    assert await verify_password("nope", stored) is False
 
 
-def test_verify_tolerates_a_corrupt_stored_hash() -> None:
+async def test_verify_tolerates_a_corrupt_stored_hash() -> None:
     """A malformed row must fail the login, not crash the endpoint."""
-    assert verify_password("anything", "not-a-hash") is False
+    assert await verify_password("anything", "not-a-hash") is False
 
 
-def test_long_passphrases_are_not_truncated() -> None:
+async def test_long_passphrases_are_not_truncated() -> None:
     """Unlike bcrypt, Argon2 has no 72-byte cut-off; prove it."""
     base = "a" * 200
-    assert verify_password(base, hash_password(base))
-    assert verify_password(base + "b", hash_password(base)) is False
+    stored = await hash_password(base)
+    assert await verify_password(base, stored)
+    assert await verify_password(base + "b", stored) is False
+
+
+async def test_hashing_does_not_block_the_event_loop() -> None:
+    """Other requests keep being served while a password is checked.
+
+    A ticker that wants to run every 5 ms measures the longest gap it sees
+    while verifications run. On the loop, each verification stalls it for
+    the full Argon2 cost (100 ms or more); off the loop, the gaps stay near
+    the tick interval.
+    """
+    stored = await hash_password("correct-horse-battery-staple")
+    gaps: list[float] = []
+    done = asyncio.Event()
+
+    async def ticker() -> None:
+        last = time.perf_counter()
+        while not done.is_set():
+            await asyncio.sleep(0.005)
+            now = time.perf_counter()
+            gaps.append(now - last)
+            last = now
+
+    task = asyncio.create_task(ticker())
+    for _ in range(3):
+        await verify_password("correct-horse-battery-staple", stored)
+    done.set()
+    await task
+
+    assert len(gaps) > 3, "the loop should have ticked while hashing ran"
+    # Generous for a loaded CI machine, and still far below one Argon2 run.
+    assert max(gaps) < 0.06
 
 
 # --- Access tokens -----------------------------------------------------------
@@ -180,3 +217,39 @@ def test_opaque_hash_is_deterministic_and_hides_the_token() -> None:
 )
 def test_email_normalization(raw: str, expected: str) -> None:
     assert normalize_email(raw) == expected
+
+
+# --- Email verification tokens -----------------------------------------------
+
+
+def test_verification_token_round_trip(settings: Settings) -> None:
+    user_id = uuid.uuid4()
+    token = create_email_verification_token(settings, user_id=user_id, email="a@example.com")
+
+    claims = decode_email_verification_token(settings, token)
+
+    assert claims.user_id == user_id
+    assert claims.email == "a@example.com"
+
+
+def test_an_access_token_is_not_a_verification_token(settings: Settings) -> None:
+    """Same secret, different purpose: each decoder insists on its own type."""
+    access, _ = create_access_token(settings, user_id=uuid.uuid4(), session_id=uuid.uuid4())
+    with pytest.raises(TokenError):
+        decode_email_verification_token(settings, access)
+
+
+def test_a_verification_token_is_not_an_access_token(settings: Settings) -> None:
+    """Otherwise the emailed link would be a working credential for the API."""
+    token = create_email_verification_token(settings, user_id=uuid.uuid4(), email="a@example.com")
+    with pytest.raises(TokenError):
+        decode_access_token(settings, token)
+
+
+def test_an_expired_verification_token_is_rejected(settings: Settings) -> None:
+    issued = datetime.now(UTC) - timedelta(hours=settings.email_verification_ttl_hours + 1)
+    token = create_email_verification_token(
+        settings, user_id=uuid.uuid4(), email="a@example.com", now=issued
+    )
+    with pytest.raises(TokenError):
+        decode_email_verification_token(settings, token)

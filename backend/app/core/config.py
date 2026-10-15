@@ -198,12 +198,32 @@ class Settings(BaseSettings):
     rate_limit_login: int = 10
     rate_limit_register: int = 5
     rate_limit_forgot_password: int = 5
+    # The same endpoints limited per *account* (by email), over the same
+    # window. Per-IP limits do nothing against a botnet spreading attempts on
+    # one account across thousands of addresses; these do.
+    rate_limit_login_per_account: int = 20
+    rate_limit_forgot_password_per_account: int = 3
     rate_limit_window_seconds: int = 300
     # Runs are the billable path, so they are limited per *user* rather than
     # per IP: an authenticated caller behind a shared NAT must not starve
     # others, and one account must not spend unbounded provider budget.
     rate_limit_runs: int = 20
     rate_limit_runs_window_seconds: int = 60
+    # Runs started per user in any rolling 24 hours. The per-minute limit stops
+    # bursts; a patient script staying just under it could still start ~28,800
+    # runs a day. This caps what one account can spend, counted from the runs
+    # table itself, so it holds across replicas and survives a Redis restart.
+    daily_run_limit_per_user: int = Field(default=100, ge=1)
+    # Verification emails one account may request per rate-limit window.
+    # Bounds how often the app can be made to mail a single address.
+    rate_limit_resend_verification: int = 3
+
+    # --- Email verification ---
+    # Unverified accounts can sign in and organise conversations but cannot
+    # start runs: a run spends provider money, and accounts on addresses
+    # nobody controls are otherwise free to mint. Production refuses false.
+    require_email_verification: bool = True
+    email_verification_ttl_hours: int = Field(default=48, ge=1)
 
     @field_validator("jwt_secret")
     @classmethod
@@ -243,6 +263,11 @@ class Settings(BaseSettings):
         # would coordinate only with itself.
         if not self.redis_url:
             problems.append("REDIS_URL is required in production")
+        if not self.require_email_verification:
+            problems.append(
+                "REQUIRE_EMAIL_VERIFICATION must be true in production: unverified "
+                "accounts would spend provider budget"
+            )
         if self.langsmith_tracing and not self.langsmith_api_key:
             problems.append("LANGSMITH_API_KEY is required when LANGSMITH_TRACING is true")
         if self.metrics_token and len(self.metrics_token) < 32:

@@ -10,6 +10,8 @@ export type ApiErrorCode =
   | 'origin_not_allowed'
   | 'email_already_registered'
   | 'rate_limited'
+  | 'daily_quota_exceeded'
+  | 'email_not_verified'
   | 'conversation_not_found'
   | 'invalid_cursor'
   | 'internal_error'

@@ -16,6 +16,7 @@ export type RegisterRequest = Schemas['RegisterRequest']
 export type LoginRequest = Schemas['LoginRequest']
 export type ForgotPasswordRequest = Schemas['ForgotPasswordRequest']
 export type ResetPasswordRequest = Schemas['ResetPasswordRequest']
+export type VerifyEmailRequest = Schemas['VerifyEmailRequest']
 export type MessageResponse = Schemas['MessageResponse']
 export type ErrorBody = Schemas['ErrorBody']
 

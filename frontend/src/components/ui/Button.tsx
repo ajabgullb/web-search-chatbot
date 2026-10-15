@@ -1,5 +1,5 @@
 import { cva, type VariantProps } from 'class-variance-authority'
-import type { ButtonHTMLAttributes } from 'react'
+import type { ComponentProps } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -26,7 +26,9 @@ const button = cva(
   },
 )
 
-type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof button>
+// `ComponentProps` rather than the bare HTML attributes so `ref` passes through
+// (React 19 treats it as an ordinary prop): callers move focus onto buttons.
+type ButtonProps = ComponentProps<'button'> & VariantProps<typeof button>
 
 export function Button({ className, variant, size, ...props }: ButtonProps) {
   return <button className={cn(button({ variant, size }), className)} {...props} />

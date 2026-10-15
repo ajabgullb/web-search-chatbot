@@ -19,7 +19,7 @@ from httpx import AsyncClient
 from app.agent.prompts import ANSWER_DIRECT_SYSTEM, SYNTHESIZE_SYSTEM, UNTRUSTED_CONTENT_CLAUSE
 from app.agent.routing import SearchDecision
 from app.models.run import RunStatus
-from app.providers.llm import LLMPermanentError, LLMTransientError
+from app.providers.llm import LLMAuthError, LLMPermanentError, LLMTransientError
 from app.providers.search import SearchTransientError
 from app.schemas.runs import TERMINAL_EVENT_TYPES
 from tests.fakes import FakeLLM, FakeSearchProvider, hit
@@ -200,13 +200,26 @@ async def test_a_search_outage_is_reported_as_a_degraded_answer(
     assert rows[-1].notice == message["notice"]
 
 
+_UNAVAILABLE = ("llm_unavailable", "The language model is unavailable. Please try again.")
+_AUTH_FAILED = ("llm_auth_failed", "The assistant is misconfigured and cannot answer right now.")
+
+
 @pytest.mark.parametrize(
-    ("error", "retryable"),
-    [(LLMTransientError("503"), True), (LLMPermanentError("401"), False)],
+    ("error", "expected", "retryable"),
+    [
+        (LLMTransientError("503"), _UNAVAILABLE, True),
+        (LLMPermanentError("400"), _UNAVAILABLE, False),
+        (LLMAuthError("401"), _AUTH_FAILED, False),
+    ],
 )
 async def test_a_model_failure_ends_the_stream_with_run_failed(
-    app: FastAPI, client: AsyncClient, error: Exception, retryable: bool
+    app: FastAPI,
+    client: AsyncClient,
+    error: Exception,
+    expected: tuple[str, str],
+    retryable: bool,
 ) -> None:
+    code, message = expected
     await install_providers(app, llm=FakeLLM(answer_error=error))
     headers, conversation = await _setup(client)
 
@@ -214,15 +227,11 @@ async def test_a_model_failure_ends_the_stream_with_run_failed(
     assert_well_formed(stream)
     failed = stream.terminal
     assert failed["type"] == "run.failed"
-    assert failed["error"] == {
-        "code": "llm_unavailable",
-        "message": "The language model is unavailable. Please try again.",
-        "retryable": retryable,
-    }
+    assert failed["error"] == {"code": code, "message": message, "retryable": retryable}
 
     (run,) = await runs_for(app, conversation["id"])
     assert run.status is RunStatus.failed
-    assert run.error_code == "llm_unavailable"
+    assert run.error_code == code
     assert run.error_retryable is retryable
     # The question stays; no half-answer is saved.
     assert [m.role.value for m in await messages_for(app, conversation["id"])] == ["user"]

@@ -7,14 +7,18 @@ Every security decision lives in ``app.services.auth``.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 
 from app.api.dependencies import (
     AuthServiceDep,
     ClientContextDep,
     CurrentUserDep,
     OriginVerified,
+    RateLimiterDep,
     SettingsDep,
+    enforce_login_account_limit,
+    enforce_resend_verification_limit,
+    forgot_password_allowed_for_account,
     rate_limit,
 )
 from app.core.config import Settings
@@ -25,6 +29,7 @@ from app.schemas.auth import (
     RegisterRequest,
     ResetPasswordRequest,
     TokenResponse,
+    VerifyEmailRequest,
 )
 from app.schemas.user import UserRead
 from app.services.auth import IssuedTokens
@@ -105,7 +110,9 @@ async def login(
     settings: SettingsDep,
     service: AuthServiceDep,
     client: ClientContextDep,
+    limiter: RateLimiterDep,
 ) -> TokenResponse:
+    await enforce_login_account_limit(limiter, settings, email=payload.email)
     tokens = await service.login(
         email=payload.email,
         password=payload.password,
@@ -166,13 +173,18 @@ async def logout_all(
 async def forgot_password(
     payload: ForgotPasswordRequest,
     service: AuthServiceDep,
+    settings: SettingsDep,
+    limiter: RateLimiterDep,
 ) -> MessageResponse:
     """Always returns the same acknowledgement.
 
     A different status, body, or timing for a known versus unknown address
     would turn this endpoint into an account-enumeration oracle.
     """
-    await service.request_password_reset(email=payload.email)
+    # Past the per-address limit the request is dropped silently: no email,
+    # same answer. That stops one inbox being flooded from many IPs.
+    if await forgot_password_allowed_for_account(limiter, settings, email=payload.email):
+        await service.request_password_reset(email=payload.email)
     return MessageResponse(
         detail="If an account exists for that email, a reset link has been sent."
     )
@@ -189,3 +201,34 @@ async def reset_password(
     # The reset revoked every session, so the browser's cookie is now dead.
     _clear_refresh_cookie(response, settings)
     return MessageResponse(detail="Password updated. Please sign in again.")
+
+
+@router.post("/verify-email", response_model=MessageResponse)
+async def verify_email(payload: VerifyEmailRequest, service: AuthServiceDep) -> MessageResponse:
+    """Confirm an address from the emailed link.
+
+    Unauthenticated on purpose: the link may be opened in a browser that is
+    not signed in. The signed token is the proof.
+    """
+    await service.verify_email(token=payload.token)
+    return MessageResponse(detail="Email confirmed.")
+
+
+@router.post(
+    "/resend-verification",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(enforce_resend_verification_limit)],
+)
+async def resend_verification(
+    service: AuthServiceDep, current_user: CurrentUserDep
+) -> MessageResponse:
+    """Email the caller a fresh verification link.
+
+    Bearer-authenticated like the run routes, so it needs no Origin check:
+    a cross-site page cannot attach an in-memory token.
+    """
+    sent = await service.resend_verification(user=current_user)
+    return MessageResponse(
+        detail="Verification email sent." if sent else "Your email is already confirmed."
+    )

@@ -1154,6 +1154,10 @@
           "is_active": {
             "title": "Is Active",
             "type": "boolean"
+          },
+          "is_verified": {
+            "title": "Is Verified",
+            "type": "boolean"
           }
         },
         "required": [
@@ -1161,9 +1165,25 @@
           "email",
           "display_name",
           "is_active",
+          "is_verified",
           "created_at"
         ],
         "title": "UserRead",
+        "type": "object"
+      },
+      "VerifyEmailRequest": {
+        "properties": {
+          "token": {
+            "maxLength": 1024,
+            "minLength": 16,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "VerifyEmailRequest",
         "type": "object"
       }
     },
@@ -1404,6 +1424,43 @@
         ]
       }
     },
+    "/api/v1/auth/resend-verification": {
+      "post": {
+        "description": "Email the caller a fresh verification link.\n\nBearer-authenticated like the run routes, so it needs no Origin check:\na cross-site page cannot attach an in-memory token.",
+        "operationId": "resend_verification_api_v1_auth_resend_verification_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error envelope returned for every failure."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resend Verification",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/reset-password": {
       "post": {
         "operationId": "reset_password_api_v1_auth_reset_password_post",
@@ -1440,6 +1497,48 @@
           }
         },
         "summary": "Reset Password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verify-email": {
+      "post": {
+        "description": "Confirm an address from the emailed link.\n\nUnauthenticated on purpose: the link may be opened in a browser that is\nnot signed in. The signed token is the proof.",
+        "operationId": "verify_email_api_v1_auth_verify_email_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error envelope returned for every failure."
+          }
+        },
+        "summary": "Verify Email",
         "tags": [
           "auth"
         ]

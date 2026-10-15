@@ -1,12 +1,13 @@
 /**
  * Conversation history, new chat, and the account block.
  *
- * On small screens it is an off-canvas panel; on `md` and up it is a permanent
- * column. One component either way — a second mobile-only tree would be two
+ * On small screens it is an off-canvas panel; on `md` and up it is a column
+ * the user can collapse. One component either way — a second mobile-only tree would be two
  * things to keep in sync.
  */
 
-import { Plus, X } from 'lucide-react'
+import { PanelLeftClose, Plus, X } from 'lucide-react'
+import type { Ref } from 'react'
 import { useNavigate, useParams } from 'react-router'
 
 import { Button } from '@/components/ui/Button'
@@ -21,7 +22,19 @@ import {
 import { useAuth } from '@/features/auth/useAuth'
 import { cn } from '@/lib/utils'
 
-export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function Sidebar({
+  open,
+  onClose,
+  collapsed,
+  onCollapse,
+  collapseButtonRef,
+}: {
+  open: boolean
+  onClose: () => void
+  collapsed: boolean
+  onCollapse: () => void
+  collapseButtonRef: Ref<HTMLButtonElement>
+}) {
   const { conversationId } = useParams()
   const navigate = useNavigate()
   const { user, signOut } = useAuth()
@@ -66,6 +79,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           'transition-transform duration-200 motion-reduce:transition-none',
           'md:static md:z-auto md:translate-x-0',
           open ? 'translate-x-0' : '-translate-x-full',
+          // Collapsing removes the column from layout and from the
+          // accessibility tree. It never affects the mobile panel.
+          collapsed && 'md:hidden',
         )}
       >
         <div className="flex items-center gap-2 p-3">
@@ -86,6 +102,16 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             aria-label="Close conversation list"
           >
             <X className="size-4" aria-hidden />
+          </Button>
+          <Button
+            ref={collapseButtonRef}
+            size="icon"
+            variant="ghost"
+            className="hidden md:inline-flex"
+            onClick={onCollapse}
+            aria-label="Collapse sidebar"
+          >
+            <PanelLeftClose className="size-4" aria-hidden />
           </Button>
         </div>
 

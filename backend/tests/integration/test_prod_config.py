@@ -72,6 +72,7 @@ def test_a_valid_production_configuration_starts() -> None:
         ({"SMTP_HOST": ""}, "SMTP_HOST"),
         ({"SMTP_SECURITY": "none"}, "SMTP_SECURITY"),
         ({"LOG_LEVEL": "DEBUG"}, "DEBUG"),
+        ({"REQUIRE_EMAIL_VERIFICATION": "false"}, "REQUIRE_EMAIL_VERIFICATION"),
     ],
 )
 def test_a_bad_setting_stops_the_process_with_a_clear_message(

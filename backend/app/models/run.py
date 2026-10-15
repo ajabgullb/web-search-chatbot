@@ -90,6 +90,9 @@ class Run(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index("ix_runs_conversation_created", "conversation_id", text("created_at DESC")),
         Index("ix_runs_user_message", "user_message_id"),
+        # The daily quota counts a user's runs in the last 24 hours on every
+        # submission; without this it is a scan of every run that user made.
+        Index("ix_runs_user_created", "user_id", "created_at"),
     )
 
     @property

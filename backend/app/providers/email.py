@@ -26,6 +26,14 @@ class EmailPayload:
     body: str
 
 
+class EmailDeliveryError(Exception):
+    """The message could not be handed to the relay.
+
+    Senders translate their transport's failures into this, so callers can
+    decide what an undelivered email means without knowing about SMTP.
+    """
+
+
 class EmailSender(Protocol):
     async def send(self, payload: EmailPayload) -> None: ...
 
@@ -53,16 +61,21 @@ class SmtpEmailSender:
         # refuse it. Certificates are always verified when TLS is on. Failures
         # propagate to the caller, which decides whether the operation is
         # critical.
-        await aiosmtplib.send(
-            message,
-            hostname=self._host,
-            port=self._port,
-            username=self._username,
-            password=self._password,
-            use_tls=self._security == "tls",
-            start_tls=self._security == "starttls",
-            timeout=self._timeout,
-        )
+        try:
+            await aiosmtplib.send(
+                message,
+                hostname=self._host,
+                port=self._port,
+                username=self._username,
+                password=self._password,
+                use_tls=self._security == "tls",
+                start_tls=self._security == "starttls",
+                timeout=self._timeout,
+            )
+        except (aiosmtplib.SMTPException, OSError) as exc:
+            # The relay's reply can echo addresses; it stays in the chained
+            # traceback for operators and never reaches a client.
+            raise EmailDeliveryError("SMTP delivery failed") from exc
 
 
 class LoggingEmailSender:

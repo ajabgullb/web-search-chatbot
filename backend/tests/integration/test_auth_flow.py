@@ -44,7 +44,14 @@ async def test_password_hash_is_never_exposed(client: AsyncClient) -> None:
     response = await client.get("/api/v1/users/me", headers=auth_header(tokens))
 
     assert response.status_code == 200
-    assert set(response.json()) == {"id", "email", "display_name", "is_active", "created_at"}
+    assert set(response.json()) == {
+        "id",
+        "email",
+        "display_name",
+        "is_active",
+        "is_verified",
+        "created_at",
+    }
 
 
 async def test_duplicate_email_is_rejected_regardless_of_case(client: AsyncClient) -> None:

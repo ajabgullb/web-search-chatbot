@@ -54,8 +54,10 @@ services:
       # Overrides the host-facing value in .env: inside the network the
       # database is reachable as `postgres`, not `localhost`.
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}
-      SMTP_HOST: mailpit
-      SMTP_PORT: 1025
+      # Mail goes to Mailpit unless DEV_SMTP_HOST names a real relay. These
+      # win over SMTP_HOST/SMTP_PORT in .env, which describe the host-side view.
+      SMTP_HOST: ${DEV_SMTP_HOST:-mailpit}
+      SMTP_PORT: ${DEV_SMTP_PORT:-1025}
       REDIS_URL: redis://redis:6379/0
     # Single dev replica, so migrating here is safe. Production runs migrations
     # as an explicit release job instead (AGENTS.md §14).

@@ -30,6 +30,7 @@ async def test_forgot_password_answer_is_identical_for_unknown_accounts(
     client: AsyncClient, email_outbox: RecordingEmailSender
 ) -> None:
     await register(client, email="real@example.com")
+    email_outbox.sent.clear()  # registration's verification email
 
     known = await client.post("/api/v1/auth/forgot-password", json={"email": "real@example.com"})
     unknown = await client.post("/api/v1/auth/forgot-password", json={"email": "ghost@example.com"})

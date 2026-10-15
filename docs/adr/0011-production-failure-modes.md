@@ -48,5 +48,7 @@ Two supporting decisions:
   password, and a metrics token before production will start.
 - Verified end to end on the production images: migrations as a one-shot
   job, non-root containers, hidden docs, a token-guarded `/metrics`, Redis
-  rate limits keyed on the real client IP through the proxy, JSON logs with no
+  rate limits keyed on the real client IP through the proxy (for honest
+  clients; a spoofed `X-Forwarded-For` was still believed until
+  [ADR-0014](0014-edge-backups-and-capacity.md) fixed it), JSON logs with no
   secrets, and a clean graceful stop.

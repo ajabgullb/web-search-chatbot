@@ -19,11 +19,15 @@ from app.api.errors import (
     EmailAlreadyRegistered,
     InvalidCredentials,
     InvalidToken,
+    ServiceUnavailable,
 )
 from app.core.config import Settings
 from app.core.logging import user_ref
 from app.core.security import (
+    TokenError,
     create_access_token,
+    create_email_verification_token,
+    decode_email_verification_token,
     fingerprint_ip,
     generate_opaque_token,
     hash_opaque_token,
@@ -35,7 +39,7 @@ from app.core.security import (
 from app.models.auth_session import AuthSession
 from app.models.password_reset_token import PasswordResetToken
 from app.models.user import User
-from app.providers.email import EmailPayload, EmailSender
+from app.providers.email import EmailDeliveryError, EmailPayload, EmailSender
 from app.repositories.auth_sessions import AuthSessionRepository
 from app.repositories.password_reset_tokens import PasswordResetTokenRepository
 from app.repositories.users import UserRepository
@@ -87,7 +91,7 @@ class AuthService:
 
         user = User(
             email=normalized,
-            password_hash=hash_password(password),
+            password_hash=await hash_password(password),
             display_name=display_name.strip(),
         )
         self._users.add(user)
@@ -103,6 +107,14 @@ class AuthService:
         tokens = await self._start_session(user, client=client)
         await self._session.commit()
         logger.info("user_registered", extra={"user": user_ref(user.id)})
+
+        # After the commit, and never fatal: the account exists either way, and
+        # failing the request now would leave the client retrying into a 409.
+        # The user can ask for another email from the chat screen.
+        try:
+            await self._send_verification_email(user)
+        except EmailDeliveryError:
+            logger.warning("verification_email_failed", extra={"user": user_ref(user.id)})
         return tokens
 
     async def login(self, *, email: str, password: str, client: ClientContext) -> IssuedTokens:
@@ -111,10 +123,10 @@ class AuthService:
         if user is None:
             # Spend the same time as a real verification so response latency
             # cannot be used to discover which addresses are registered.
-            verify_dummy_password(password)
+            await verify_dummy_password(password)
             raise InvalidCredentials
 
-        if not verify_password(password, user.password_hash):
+        if not await verify_password(password, user.password_hash):
             raise InvalidCredentials
 
         # An inactive account gets the same answer as a wrong password: its
@@ -201,6 +213,63 @@ class AuthService:
         )
         return revoked
 
+    # --- Email verification --------------------------------------------------
+
+    async def resend_verification(self, *, user: User) -> bool:
+        """Email a fresh verification link. False if there is nothing to verify."""
+        if user.is_verified:
+            return False
+        try:
+            await self._send_verification_email(user)
+        except EmailDeliveryError as exc:
+            logger.warning("verification_email_failed", extra={"user": user_ref(user.id)})
+            raise ServiceUnavailable(
+                "The email could not be sent. Try again shortly.",
+                headers={"Retry-After": "30"},
+            ) from exc
+        return True
+
+    async def verify_email(self, *, token: str) -> None:
+        """Mark the address in ``token`` as verified.
+
+        Needs no session: the link may be opened in another browser or on a
+        phone. Idempotent, so a second click on the same link succeeds too.
+        """
+        try:
+            claims = decode_email_verification_token(self._settings, token)
+        except TokenError as exc:
+            raise InvalidToken from exc
+
+        user = await self._users.get_by_id(claims.user_id)
+        # A link for an address the account no longer has proves nothing
+        # about the address it has now.
+        if user is None or not user.is_active or user.email != claims.email:
+            raise InvalidToken
+
+        if not user.is_verified:
+            user.is_verified = True
+            await self._session.commit()
+            logger.info("email_verified", extra={"user": user_ref(user.id)})
+
+    async def _send_verification_email(self, user: User) -> None:
+        token = create_email_verification_token(self._settings, user_id=user.id, email=user.email)
+        verify_url = f"{self._settings.frontend_origin}/verify-email?token={token}"
+        hours = self._settings.email_verification_ttl_hours
+        await self._email.send(
+            EmailPayload(
+                to=user.email,
+                subject=f"Confirm your email for {self._settings.app_name}",
+                body=(
+                    f"Hello {user.display_name},\n\n"
+                    "Open the link below to confirm this is your address. You can start "
+                    f"chatting once it is confirmed. The link expires in {hours} hours.\n\n"
+                    f"{verify_url}\n\n"
+                    "If you did not create an account, you can ignore this email.\n"
+                ),
+            )
+        )
+        logger.info("verification_email_sent", extra={"user": user_ref(user.id)})
+
     # --- Password reset ------------------------------------------------------
 
     async def request_password_reset(self, *, email: str) -> None:
@@ -264,7 +333,7 @@ class AuthService:
         if user is None or not user.is_active:
             raise InvalidToken
 
-        user.password_hash = hash_password(new_password)
+        user.password_hash = await hash_password(new_password)
         stored.used_at = now
         revoked = await self._sessions.revoke_all_for_user(user.id, at=now)
 

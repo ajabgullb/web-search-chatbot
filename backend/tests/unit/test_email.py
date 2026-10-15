@@ -62,3 +62,21 @@ async def test_no_credentials_means_no_login(sent: list[dict[str, Any]]) -> None
 
     assert sent[0]["username"] is None
     assert sent[0]["password"] is None
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [OSError("connection refused"), email.aiosmtplib.SMTPServerDisconnected("gone")],
+)
+async def test_transport_failures_surface_as_delivery_errors(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    """Callers catch one provider-neutral error, not SMTP library types."""
+
+    async def failing_send(message: Any, **kwargs: Any) -> None:
+        raise failure
+
+    monkeypatch.setattr(email.aiosmtplib, "send", failing_send)
+    sender = SmtpEmailSender(Settings(smtp_host="mail.example.com"))
+    with pytest.raises(email.EmailDeliveryError):
+        await sender.send(PAYLOAD)

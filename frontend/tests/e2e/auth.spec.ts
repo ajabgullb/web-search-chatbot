@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { register, signIn, startConversation } from './helpers.ts'
+import { ask, openConfirmationLink, register, signIn, startConversation } from './helpers.ts'
 
 test('register, keep the session across a reload, sign out, sign back in', async ({ page }) => {
   const email = await register(page, 'auth')
@@ -43,4 +43,20 @@ test('a guarded page sends a visitor to sign in, then back where they were going
   await expect(page).toHaveURL(/\/login$/)
   await signIn(page, email)
   await expect(page).toHaveURL(destination)
+})
+
+test('an unconfirmed account is asked to confirm, and can chat once it has', async ({ page }) => {
+  const email = await register(page, 'confirm', { verify: false })
+  const prompt = page.getByText(/confirm your email to start chatting/i)
+  await expect(prompt).toBeVisible()
+
+  // The server refuses the question; what was typed is kept for a retry.
+  await startConversation(page)
+  await ask(page, 'Hello there')
+  await expect(page.getByText(/^not sent\. confirm your email address/i)).toBeVisible()
+
+  await openConfirmationLink(page, email)
+  await page.getByRole('link', { name: 'Start chatting' }).click()
+  await expect(page).toHaveURL(/\/chat$/)
+  await expect(prompt).toBeHidden()
 })

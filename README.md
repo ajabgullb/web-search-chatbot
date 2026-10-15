@@ -10,8 +10,8 @@ sources.
 
 **Status: all nine phases of [`PLAN.md`](./PLAN.md) are implemented.**
 
-- **Accounts.** Register, sign in, stay signed in across reloads, reset a
-  password.
+- **Accounts.** Register, confirm your email, sign in, stay signed in across
+  reloads, reset a password. Each account may start up to 100 answers a day.
 - **Conversations.** Create, rename, and delete conversations.
 - **Answers.** Asking a question streams the answer with live search
   progress, inline citation buttons, and source cards. You can stop an
@@ -54,6 +54,23 @@ make dev                  # builds and starts api, web, postgres, redis, mailpit
 | API docs | http://localhost:8000/api/v1/docs |
 | Mailpit | http://localhost:8025 |
 
+A new account must confirm its email before it can chat. In development the
+confirmation email lands in Mailpit: open it there and follow the link.
+Mailpit catches every message and delivers nothing, so nothing reaches a real
+inbox. To send real mail from the dev stack, point it at a relay in `.env`. For
+Gmail, which needs an [app password](https://myaccount.google.com/apppasswords):
+
+```bash
+DEV_SMTP_HOST=smtp.gmail.com
+DEV_SMTP_PORT=587
+SMTP_SECURITY=starttls
+SMTP_USERNAME=you@gmail.com
+SMTP_PASSWORD=<16-character app password>
+EMAIL_FROM=you@gmail.com
+```
+
+Then run `docker compose up -d api` to recreate the API container with them.
+
 If another project already uses one of those ports, change `POSTGRES_HOST_PORT`,
 `API_HOST_PORT`, `WEB_HOST_PORT`, `REDIS_HOST_PORT`, `MAILPIT_SMTP_HOST_PORT`, or
 `MAILPIT_UI_HOST_PORT` in `.env`. Three settings contain a port and must follow
@@ -87,6 +104,19 @@ make migrate      # alembic upgrade head
 After adding a backend or frontend dependency, run `make rebuild` — the dev
 containers cache their `.venv` and `node_modules` in anonymous volumes that a
 plain rebuild will not refresh.
+
+After editing `.env` — a new `LLM_API_KEY`, say — recreate the container that
+reads it:
+
+```bash
+docker compose up -d --force-recreate api
+```
+
+Compose copies `env_file` values into a container only when it creates it, so
+a running container keeps the old values, and `docker compose restart` restarts
+that same container with them. A stale or wrong model key shows up as a
+`run.failed` with code `llm_auth_failed`, and as an `llm_auth_failed` warning
+in `make logs`.
 
 `migrate`, `migration`, `downgrade`, and `test-backend` run a `check-db`
 preflight first, so a stopped database gives you one clear line instead of a
@@ -140,6 +170,15 @@ make prod-down                               # data volumes are kept
   API, which publishes no port. Terminate TLS in front of the stack (a load
   balancer, Caddy, or Traefik) and forward to `WEB_HOST_PORT` with
   `X-Forwarded-Proto: https`. nginx then adds HSTS.
+- **Trusted proxies.** Set `TRUSTED_PROXY_CIDRS` to the addresses your TLS
+  proxy (and Cloudflare, if used) connects from. nginx believes
+  `X-Forwarded-For` only from them, so clients cannot fake the address that
+  rate limits key on. [docs/deployment.md](docs/deployment.md) covers TLS,
+  Cloudflare, and the firewall.
+- **Backups.** The `backup` service dumps the database daily into
+  `BACKUP_HOST_DIR` and keeps 14 days. `make prod-backup` dumps now,
+  `make prod-restore file=... confirm=yes` restores. Copy the directory off
+  the machine; see the deployment guide.
 - **Migrations run once**, as the `migrate` job. The API starts only after it
   has exited successfully, and replicas never race to migrate.
 - **The configuration fails closed at two levels.** Compose refuses to start
@@ -155,15 +194,21 @@ make prod-down                               # data volumes are kept
   token the endpoint does not exist. LangSmith tracing is optional and never
   uploads content.
 
+**Capacity.** One API process comfortably carries about 50 answers streaming
+at once (roughly 500 answers a minute) and tops out near 700 a minute on one
+CPU core; add replicas to go further. Measured with `make loadtest`; details
+in [docs/load-testing.md](docs/load-testing.md).
+
 Both images run as non-root users, carry health checks, and contain no
 secrets. Everything sensitive arrives through the environment at run time.
 
 ## Layout
 
 ```
-backend/    FastAPI app (app/), Alembic migrations, tests, agent evals (evals/)
-frontend/   Vite + React app (src/), Playwright e2e (tests/e2e)
-docs/       architecture, API, security, ADRs
+backend/    FastAPI app (app/), Alembic migrations, tests (incl. load/), agent evals (evals/)
+frontend/   Vite + React app (src/), Playwright e2e (tests/e2e), nginx config
+deploy/     backup and restore scripts used by compose.prod.yaml
+docs/       architecture, API, security, deployment, load testing, ADRs
 compose.yaml  local development stack
 compose.prod.yaml  production-shaped stack (see "Running in production")
 Makefile      task runner

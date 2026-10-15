@@ -14,6 +14,7 @@ import type {
   ResetPasswordRequest,
   TokenResponse,
   User,
+  VerifyEmailRequest,
 } from '@/api/types'
 
 export async function register(payload: RegisterRequest): Promise<TokenResponse> {
@@ -58,6 +59,19 @@ export function resetPassword(payload: ResetPasswordRequest): Promise<MessageRes
     body: payload,
     retryOnUnauthorized: false,
   })
+}
+
+/** Unauthenticated: the emailed link may be opened in a signed-out browser. */
+export function verifyEmail(payload: VerifyEmailRequest): Promise<MessageResponse> {
+  return request<MessageResponse>('/auth/verify-email', {
+    method: 'POST',
+    body: payload,
+    retryOnUnauthorized: false,
+  })
+}
+
+export function resendVerification(): Promise<MessageResponse> {
+  return request<MessageResponse>('/auth/resend-verification', { method: 'POST' })
 }
 
 export function fetchCurrentUser(): Promise<User> {

@@ -470,6 +470,29 @@ describe('stopping and retrying', () => {
     expect(state.runBodies.at(-1)).toEqual({ content: 'Are you there?' })
   })
 
+  it('explains a refusal that waiting a moment will not fix', async () => {
+    const { routes } = backend()
+    stubApi({
+      ...routes,
+      [`POST /conversations/${CONVERSATION_ID}/runs`]: () =>
+        jsonResponse(429, {
+          error: {
+            code: 'daily_quota_exceeded',
+            message: 'You have reached the limit of 100 messages in 24 hours.',
+            request_id: null,
+            details: { limit: 100, retry_after_seconds: 5 * 3600 + 60 },
+          },
+        }),
+    })
+    await openConversation()
+    await send('One more question')
+
+    const bubble = screen.getByRole('article', { name: 'Your message' })
+    expect(await within(bubble).findByText(/not sent/i)).toHaveTextContent(
+      'You have reached your daily message limit. You can send more in about 6 h.',
+    )
+  })
+
   it('treats a send that never reached the server as not sent', async () => {
     const { routes } = backend()
     stubApi({

@@ -31,10 +31,16 @@ RUN npm run build
 FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
 # Where /api/ is proxied, and the DNS server that resolves it (Docker's
 # embedded resolver). Override both outside Docker Compose.
+# TRUSTED_PROXY_CIDRS lists the proxies in front of nginx whose
+# X-Forwarded-For may be believed (see nginx/25-real-ip.sh).
 ENV API_UPSTREAM=http://api:8000 \
-    NGINX_RESOLVER=127.0.0.11
+    NGINX_RESOLVER=127.0.0.11 \
+    TRUSTED_PROXY_CIDRS=""
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY nginx/security-headers.conf /etc/nginx/snippets/security-headers.conf
+# Executable regardless of the checkout's file modes; the entrypoint skips
+# scripts that are not.
+COPY --chmod=0755 nginx/25-real-ip.sh /docker-entrypoint.d/25-real-ip.sh
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=3 \

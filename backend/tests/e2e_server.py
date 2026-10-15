@@ -4,8 +4,9 @@
 
 Everything is the production code path (auth, runs, SSE, persistence,
 cancellation) except the two paid dependencies, which are replaced by
-deterministic stand-ins. It lives under tests/ so the stand-ins never ship in
-an image.
+deterministic stand-ins, and email, which is kept in memory so a spec can
+open the confirmation link it was sent. It lives under tests/ so the stand-ins
+and the outbox route never ship in an image.
 
 On import it points at its own database (``E2E_DATABASE_URL``, or the dev
 database's name plus ``_e2e``), migrates it with Alembic, and empties it, so
@@ -16,25 +17,18 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
-import sys
 from collections.abc import AsyncIterator, Sequence
-from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from langchain_core.messages import AnyMessage, HumanMessage
-from sqlalchemy import text
-from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import create_async_engine
 
 import app.main as app_main
 from app.agent.routing import SearchDecision
-from app.core.config import Environment, Settings, get_settings
+from app.core.config import Environment, Settings
+from app.providers.email import EmailPayload
 from app.providers.llm import LLMChunk, StructuredT
 from app.providers.search import SearchHit
-from tests.integration.conftest import _create_database_if_missing
-
-BACKEND_DIR = Path(__file__).resolve().parents[1]
+from tests.scratch_database import prepare_scratch_database, scratch_database_url
 
 # Words the scripted model reacts to, so each spec can pick its path.
 SLOW_TRIGGER = "slow"
@@ -112,46 +106,19 @@ class ScriptedSearch:
         return None
 
 
-def _database_url() -> str:
-    configured = os.environ.get("E2E_DATABASE_URL")
-    if configured:
-        return configured
-    url = make_url(str(get_settings().database_url))
-    return url.set(database=f"{url.database}_e2e").render_as_string(hide_password=False)
+class Outbox:
+    """Keeps the last email sent to each address."""
 
+    def __init__(self) -> None:
+        self.latest: dict[str, EmailPayload] = {}
 
-def _migrate(database_url: str) -> None:
-    migrated = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=BACKEND_DIR,
-        env={**os.environ, "DATABASE_URL": database_url},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if migrated.returncode != 0:
-        raise SystemExit(f"e2e database migration failed:\n{migrated.stderr}")
-
-
-async def _empty(database_url: str) -> None:
-    engine = create_async_engine(database_url)
-    try:
-        async with engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "TRUNCATE users, auth_sessions, password_reset_tokens, conversations, "
-                    "messages RESTART IDENTITY CASCADE"
-                )
-            )
-    finally:
-        await engine.dispose()
+    async def send(self, payload: EmailPayload) -> None:
+        self.latest[payload.to] = payload
 
 
 def build() -> FastAPI:
-    database_url = _database_url()
-    asyncio.run(_create_database_if_missing(database_url))
-    _migrate(database_url)
-    asyncio.run(_empty(database_url))
+    database_url = scratch_database_url(env_var="E2E_DATABASE_URL", suffix="_e2e")
+    prepare_scratch_database(database_url)
     settings = Settings(
         # Development: the refresh cookie is not Secure, because Playwright
         # talks plain http to the Vite server.
@@ -172,7 +139,19 @@ def build() -> FastAPI:
     # The lifespan builds providers through these; swap them before it runs.
     app_main.build_llm_provider = lambda _settings: ScriptedLLM()  # type: ignore[assignment]
     app_main.build_search_provider = lambda _settings: ScriptedSearch()  # type: ignore[assignment]
-    return app_main.create_app(settings)
+    outbox = Outbox()
+    app_main.build_email_sender = lambda _settings: outbox  # type: ignore[assignment]
+    application = app_main.create_app(settings)
+
+    @application.get("/__e2e/latest-email", include_in_schema=False)
+    async def latest_email(to: str) -> dict[str, str]:
+        """The last message sent to ``to``, for a spec to follow its link."""
+        payload = outbox.latest.get(to)
+        if payload is None:
+            raise HTTPException(status_code=404)
+        return {"subject": payload.subject, "body": payload.body}
+
+    return application
 
 
 app = build()

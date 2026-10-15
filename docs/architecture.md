@@ -143,8 +143,12 @@ state of a visitor — so it never redirects. Route guards wait out the
 being bounced to `/login` on every reload.
 
 `RequireAuth` stores the attempted location in navigation state so the login
-page can return the user there. `/reset-password` is deliberately public: a
-stale session in another tab must not block a reset from an emailed link.
+page can return the user there. `/reset-password` and `/verify-email` are
+deliberately public: an emailed link must work whatever session the browser
+holds. `/verify-email` re-reads the account through `refreshUser()` once both
+the confirmation and the session bootstrap have finished, in either order, so
+the chat's "confirm your email" banner (`VerifyEmailBanner`) disappears without
+a reload.
 
 ## Conversation domain
 
@@ -178,6 +182,12 @@ in [ADR-0006](adr/0006-markdown-rendering.md).
 the history list. `/chat` is an empty state that deliberately does **not**
 auto-create a conversation — a user who lands there, reloads, or signs back in
 would otherwise leave a trail of empty threads.
+It greets the user by the first word of their display name, with a line that
+changes on each visit and never repeats the previous one.
+
+On `md` and up the sidebar can be collapsed; the choice is a layout preference,
+so it is remembered in `localStorage` (never anything auth-related). Below `md`
+it is the off-canvas panel, independent of that setting.
 
 TanStack Query retries are narrow: a 4xx is the server saying the request itself
 is wrong, and repeating it only delays the error the user needs to see. Transient
@@ -279,6 +289,7 @@ from the model, whether or not anyone is listening, so there is one code path.
 | Model cites a label that was never retrieved | Marker stripped from the answer and logged. |
 | Searched answer with no valid citation | `degraded`, with a notice that sources could not be verified. |
 | Model unavailable | Terminal `llm_unavailable`; `retryable` only for transient errors. |
+| Model rejects the key (401/403) | Terminal `llm_auth_failed`, not retryable, logged as a warning so a bad or stale key is not mistaken for an outage. |
 | Run exceeds `RUN_TIMEOUT_SECONDS` | Terminal `run_timeout`, retryable. |
 
 ### Checkpoints versus messages

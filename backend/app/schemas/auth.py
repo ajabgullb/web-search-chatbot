@@ -47,6 +47,11 @@ class ResetPasswordRequest(BaseModel):
     password: Password
 
 
+class VerifyEmailRequest(BaseModel):
+    # A signed token, longer than an opaque one; the ceiling bounds parsing.
+    token: str = Field(min_length=16, max_length=1024)
+
+
 class MessageResponse(BaseModel):
     """Deliberately uninformative acknowledgement.
 

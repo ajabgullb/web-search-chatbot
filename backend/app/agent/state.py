@@ -57,6 +57,7 @@ class Citation(TypedDict):
 ErrorCode = Literal[
     "search_unavailable",
     "llm_unavailable",
+    "llm_auth_failed",
     "run_timeout",
     "internal_error",
 ]
