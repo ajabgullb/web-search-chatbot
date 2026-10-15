@@ -31,7 +31,7 @@ from app.agent.routing import SearchDecision, heuristic_search_decision
 from app.agent.state import AgentState, Citation, RunError, Source, trim_history
 from app.agent.tools.search import execute_searches, validate_queries
 from app.core import telemetry
-from app.providers.llm import LLMError, LLMTransientError
+from app.providers.llm import LLMAuthError, LLMError, LLMTransientError
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,19 @@ def _last_user_message(messages: list[AnyMessage]) -> str:
 
 def _llm_error(exc: LLMError) -> RunError:
     telemetry.record_llm_failure("transient" if isinstance(exc, LLMTransientError) else "permanent")
+    if isinstance(exc, LLMAuthError):
+        # A warning, with its own event name, because nothing but an operator
+        # fixes it — and because a stale key in a long-running container is
+        # otherwise indistinguishable from a provider outage in the logs.
+        logger.warning(
+            "llm_auth_failed",
+            extra={"hint": "check LLM_API_KEY, then recreate the api container"},
+        )
+        return RunError(
+            code="llm_auth_failed",
+            message="The assistant is misconfigured and cannot answer right now.",
+            retryable=False,
+        )
     return RunError(
         code="llm_unavailable",
         message="The language model is unavailable. Please try again.",

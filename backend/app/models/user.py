@@ -17,8 +17,8 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    # Email verification is not part of v1; the column exists so enabling it
-    # later is a behaviour change, not a migration of live user rows.
+    # Set by the emailed confirmation link. Runs require it (see RunService),
+    # unless REQUIRE_EMAIL_VERIFICATION is off outside production.
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid

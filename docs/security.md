@@ -12,6 +12,32 @@ Hashed with **Argon2id** (`argon2-cffi` defaults, tracking RFC 9106). Minimum
 passphrases are genuinely used, and the ceiling exists only to bound the
 hashing work an anonymous caller can demand. Passwords are never logged.
 
+Argon2 is deliberately slow (100-300 ms of CPU per hash), so it never runs on
+the event loop: a hash there would freeze every open answer stream in the
+process for its duration, and a few logins a second would stall the API. The
+password functions are async and run in a two-thread pool (argon2-cffi
+releases the GIL). Two threads, because each hash already uses four lanes and
+64 MiB; more threads would add memory without throughput, and a login flood
+queues instead of exhausting the container.
+
+### Email verification
+
+Registration emails a link carrying a **signed** token (same key as access
+tokens, `typ: email_verification`, 48 h expiry) rather than a stored one. It
+only proves control of an inbox, and a second use is harmless, so a database
+row would add nothing. Each decoder insists on its own `typ`, so the link is
+not a working API credential and an access token cannot confirm an address.
+The token names the address it was sent to and is refused if the account's
+address differs.
+
+Unverified accounts may sign in and manage conversations but **cannot start
+runs** (`403 email_not_verified`): runs spend provider money, and accounts on
+addresses nobody controls are otherwise free to create. Production refuses
+`REQUIRE_EMAIL_VERIFICATION=false`. Resending is limited per account, not per
+IP, because what it protects is the inbox the mail goes to. A failed send at
+registration is logged and does not fail the registration. See
+[ADR-0013](adr/0013-abuse-controls.md).
+
 ### Tokens
 
 | | Access token | Refresh token |
@@ -102,9 +128,41 @@ users; rate limiting blunts enumeration through this route.
 Per-IP sliding windows on `login` (10), `register` (5), and `forgot-password`
 (5), each over 5 minutes, returning `429` with `Retry-After`.
 
+**Which IP.** The API takes the client address from `X-Forwarded-For`, so that
+header must not be the client's to write. Until 2026-10-11 nginx *appended* to
+whatever the client sent and uvicorn, trusting every hop, read the leftmost
+entry: a client could name a fresh address on every request and never be
+limited. nginx now resolves the client itself, believing `X-Forwarded-For`
+only from addresses in `TRUSTED_PROXY_CIDRS`, and *replaces* the header with
+that one address (`frontend/nginx/25-real-ip.sh`). Verified in containers: a
+spoofed header from a client is ignored, a trusted proxy's is honoured, and an
+untrusted peer cannot pose as a proxy. See `docs/deployment.md`.
+
+**Per account as well.** Per-IP limits do nothing against a botnet spreading
+guesses at one account over thousands of addresses. Sign-in is also limited
+per email address (`RATE_LIMIT_LOGIN_PER_ACCOUNT`, 20 per 5 minutes), checked
+before any Argon2 work and applied to a correct password too, so a 429 never
+confirms a guess. Reset emails are capped per address
+(`RATE_LIMIT_FORGOT_PASSWORD_PER_ACCOUNT`, 3 per 5 minutes) *silently*: the
+response is unchanged, so the cap cannot be used to probe accounts. Keys are a
+SHA-256 of the normalized address, so Redis holds no email addresses. The
+trade-off of any per-account limit is that an attacker can keep one account's
+password sign-in throttled; its existing sessions keep working and a reset
+still gets through.
+
 Starting a run is limited **per user** (20 per minute by default,
 `RATE_LIMIT_RUNS`): it is the path that spends provider money, and a per-IP
 limit would let one account on a shared network starve the others.
+
+A per-minute limit alone still allows ~28,800 runs a day to a patient script,
+so each user also has a **daily quota** (`DAILY_RUN_LIMIT_PER_USER`, 100 runs
+in any rolling 24 hours), refused with `429 daily_quota_exceeded`. It is
+counted from the `runs` table (indexed on `user_id, created_at`), so it holds
+across replicas and survives a Redis restart. Runs in deleted conversations
+still count, so deleting a thread cannot refund spent budget. It is a
+check-then-insert: submissions racing in different conversations can overshoot
+by the number in flight, which the per-minute limit bounds. An idempotent
+replay of an accepted request is answered even at the limit.
 
 With `REDIS_URL` set (required in production) the windows live in Redis and
 are shared by every replica. Each check is one Lua script: it drops expired
@@ -329,8 +387,8 @@ size and checkout timeout.
 
 ## Not yet implemented
 
-Email verification (`is_verified` exists but is unused), and a purge
-policy for soft-deleted conversations and their runs.
+A purge policy for soft-deleted conversations and their runs, multi-factor
+authentication, and a third-party security review.
 
 ## Reporting
 

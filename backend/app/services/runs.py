@@ -14,6 +14,8 @@ whether a run may start at all, and records it. The rules it enforces:
   the lock is lost.
 - **Atomic acceptance** — the user message and the run commit together or not
   at all.
+- **Spend limits** — a run needs a verified email address, and each user may
+  start at most ``DAILY_RUN_LIMIT_PER_USER`` runs in any rolling 24 hours.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -31,6 +34,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.prompts import PROMPT_VERSION
 from app.api.errors import (
+    DailyQuotaExceeded,
+    EmailNotVerified,
     IdempotencyKeyReused,
     MessageEmpty,
     MessageNotFound,
@@ -40,6 +45,7 @@ from app.api.errors import (
     RunNotFound,
     ServiceUnavailable,
 )
+from app.core import telemetry
 from app.core.config import Settings
 from app.core.run_lock import RunLock, RunLockUnavailable
 from app.models.conversation import Conversation
@@ -54,6 +60,9 @@ from app.services.conversations import ConversationService, MessageWithCitations
 from app.services.run_executor import RunManager
 
 logger = logging.getLogger(__name__)
+
+# The quota's rolling window.
+QUOTA_WINDOW = timedelta(hours=24)
 
 # How long a cancel request waits for the executor to record the outcome, so
 # its response can report the final status rather than "still running".
@@ -128,6 +137,9 @@ class RunService:
         payload: RunCreate,
         idempotency_key: str,
     ) -> AcceptedRun | ReplayedRun:
+        if self._settings.require_email_verification and not user.is_verified:
+            raise EmailNotVerified
+
         # Ownership first: a replay must not reveal anything about a
         # conversation the caller cannot see (or has since deleted).
         conversation = await self._conversations.get(user=user, conversation_id=conversation_id)
@@ -145,6 +157,11 @@ class RunService:
 
         if content is not None:
             self._check_length(content)
+
+        # After the replay check: a client retrying a request that was already
+        # accepted must get its answer back even if that run used the last
+        # unit of quota.
+        await self._check_daily_quota(user.id)
 
         # Plain values, captured before the transaction that can fail: a
         # rollback expires every ORM object in the session, the current user
@@ -213,6 +230,35 @@ class RunService:
         if not taken:
             logger.info("run_rejected_locked", extra={"conversation_id": conversation_id})
             raise await self._in_progress(conversation_id)
+
+    async def _check_daily_quota(self, user_id: uuid.UUID) -> None:
+        """Refuse a run beyond the user's rolling 24-hour allowance.
+
+        A check-then-insert, so two submissions racing in different
+        conversations can each pass at the boundary and overshoot by the
+        number in flight. That is bounded by the per-minute limit and is cheap
+        next to the cost of serialising every submission a user makes.
+        """
+        limit = self._settings.daily_run_limit_per_user
+        now = datetime.now(UTC)
+        count, oldest = await self._runs.count_started_since(
+            user_id=user_id, since=now - QUOTA_WINDOW
+        )
+        if count < limit:
+            return
+        # A slot frees up when the oldest run in the window ages out of it.
+        retry_after = (
+            max(1, math.ceil((oldest + QUOTA_WINDOW - now).total_seconds()))
+            if oldest is not None
+            else 1
+        )
+        telemetry.record_rate_limited("daily_quota")
+        logger.info("run_rejected_daily_quota", extra={"limit": limit})
+        raise DailyQuotaExceeded(
+            f"You have reached the limit of {limit} messages in 24 hours.",
+            headers={"Retry-After": str(retry_after)},
+            details={"limit": limit, "retry_after_seconds": retry_after},
+        )
 
     def _check_length(self, content: str) -> None:
         if not content:

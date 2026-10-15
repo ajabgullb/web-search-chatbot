@@ -10,6 +10,7 @@ import { LoginPage } from '@/routes/LoginPage'
 import { NotFoundPage } from '@/routes/NotFoundPage'
 import { RegisterPage } from '@/routes/RegisterPage'
 import { ResetPasswordPage } from '@/routes/ResetPasswordPage'
+import { VerifyEmailPage } from '@/routes/VerifyEmailPage'
 
 /**
  * Route table.
@@ -18,15 +19,15 @@ import { ResetPasswordPage } from '@/routes/ResetPasswordPage'
  * a session is a dead end, so those redirect), and guarded. The catch-all
  * always stays last.
  *
- * `/reset-password` is public rather than anonymous-only on purpose: someone
- * with a stale session in one tab must still be able to complete a reset from
- * an emailed link.
+ * `/reset-password` and `/verify-email` are public rather than anonymous-only
+ * on purpose: an emailed link must work whatever session the browser holds.
  */
 export function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
 
       <Route element={<RedirectIfAuthenticated />}>
         <Route path="/login" element={<LoginPage />} />

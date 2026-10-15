@@ -17,4 +17,7 @@ class UserRead(BaseModel):
     email: EmailStr
     display_name: str
     is_active: bool
+    # The client shows a "confirm your email" prompt while this is false;
+    # the server enforces it independently when a run is started.
+    is_verified: bool
     created_at: datetime

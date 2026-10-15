@@ -6,6 +6,7 @@ Dependencies read them from the request rather than creating their own.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import AsyncIterator
 from typing import Annotated
 
@@ -26,7 +27,7 @@ from app.core.config import Settings
 from app.core.logging import bind_log_context, user_ref
 from app.core.rate_limit import RateLimiter
 from app.core.run_lock import RunLock
-from app.core.security import TokenError, decode_access_token
+from app.core.security import TokenError, decode_access_token, normalize_email
 from app.db.session import Database
 from app.models.user import User
 from app.providers.email import EmailSender
@@ -191,21 +192,83 @@ def get_agent_runtime(request: Request) -> AgentRuntime:
 AgentRuntimeDep = Annotated[AgentRuntime, Depends(get_agent_runtime)]
 
 
-async def enforce_run_rate_limit(
-    current_user: CurrentUserDep, settings: SettingsDep, limiter: RateLimiterDep
+async def _enforce_limit(
+    limiter: RateLimiter, *, bucket: str, key: str, limit: int, window_seconds: int
 ) -> None:
-    """Per-user limit on starting runs — the path that spends provider money."""
-    decision = await limiter.hit(
-        f"runs:{current_user.id}",
-        limit=settings.rate_limit_runs,
-        window_seconds=settings.rate_limit_runs_window_seconds,
-    )
+    decision = await limiter.hit(f"{bucket}:{key}", limit=limit, window_seconds=window_seconds)
     if not decision.allowed:
-        telemetry.record_rate_limited("runs")
+        telemetry.record_rate_limited(bucket)
         raise RateLimited(
             headers={"Retry-After": str(decision.retry_after_seconds)},
             details={"retry_after_seconds": decision.retry_after_seconds},
         )
+
+
+async def enforce_run_rate_limit(
+    current_user: CurrentUserDep, settings: SettingsDep, limiter: RateLimiterDep
+) -> None:
+    """Per-user limit on starting runs — the path that spends provider money."""
+    await _enforce_limit(
+        limiter,
+        bucket="runs",
+        key=str(current_user.id),
+        limit=settings.rate_limit_runs,
+        window_seconds=settings.rate_limit_runs_window_seconds,
+    )
+
+
+async def enforce_resend_verification_limit(
+    current_user: CurrentUserDep, settings: SettingsDep, limiter: RateLimiterDep
+) -> None:
+    """Per user, not per IP: what it protects is the inbox the mail goes to."""
+    await _enforce_limit(
+        limiter,
+        bucket="resend_verification",
+        key=str(current_user.id),
+        limit=settings.rate_limit_resend_verification,
+        window_seconds=settings.rate_limit_window_seconds,
+    )
+
+
+def _account_key(email: str) -> str:
+    """Rate-limit key for an address. Hashed, so Redis never holds emails; any
+    string gets a key, so the limit says nothing about whether an account
+    exists."""
+    return hashlib.sha256(normalize_email(email).encode("utf-8")).hexdigest()[:32]
+
+
+async def enforce_login_account_limit(
+    limiter: RateLimiter, settings: Settings, *, email: str
+) -> None:
+    """Called before the password is checked, so a throttled attempt costs no
+    Argon2 work. The trade-off of any per-account limit: an attacker can keep
+    one account's password sign-in throttled. Its existing sessions keep
+    working and a password reset still gets through."""
+    await _enforce_limit(
+        limiter,
+        bucket="login_account",
+        key=_account_key(email),
+        limit=settings.rate_limit_login_per_account,
+        window_seconds=settings.rate_limit_window_seconds,
+    )
+
+
+async def forgot_password_allowed_for_account(
+    limiter: RateLimiter, settings: Settings, *, email: str
+) -> bool:
+    """Whether another reset email may go to this address now.
+
+    Returns a flag rather than raising: the caller answers exactly as it
+    always does, so the limit cannot be used to learn anything.
+    """
+    decision = await limiter.hit(
+        f"forgot_password_account:{_account_key(email)}",
+        limit=settings.rate_limit_forgot_password_per_account,
+        window_seconds=settings.rate_limit_window_seconds,
+    )
+    if not decision.allowed:
+        telemetry.record_rate_limited("forgot_password_account")
+    return decision.allowed
 
 
 def verify_origin(request: Request, settings: SettingsDep) -> None:
@@ -241,18 +304,13 @@ def rate_limit(bucket: str, limit_attribute: str) -> DependsMarker:
         limiter: RateLimiterDep,
     ) -> None:
         client_ip = request.client.host if request.client else "unknown"
-        limit: int = getattr(settings, limit_attribute)
-        decision = await limiter.hit(
-            f"{bucket}:{client_ip}",
-            limit=limit,
+        await _enforce_limit(
+            limiter,
+            bucket=bucket,
+            key=client_ip,
+            limit=getattr(settings, limit_attribute),
             window_seconds=settings.rate_limit_window_seconds,
         )
-        if not decision.allowed:
-            telemetry.record_rate_limited(bucket)
-            raise RateLimited(
-                headers={"Retry-After": str(decision.retry_after_seconds)},
-                details={"retry_after_seconds": decision.retry_after_seconds},
-            )
 
     # fastapi.Depends is untyped; the marker class it constructs is what
     # `dependencies=[...]` actually expects.

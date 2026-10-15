@@ -43,6 +43,7 @@ x-api-environment: &api-environment
   LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-web-search-chatbot}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   LOG_FORMAT: json
+  DAILY_RUN_LIMIT_PER_USER: ${DAILY_RUN_LIMIT_PER_USER:-100}
 
 services:
   postgres:
@@ -92,8 +93,9 @@ services:
     environment:
       <<: *api-environment
       # Trust X-Forwarded-For from any peer. Safe only because the API
-      # publishes no port: the web container is the one peer that can reach
-      # it. Real client IPs are what the per-IP rate limits key on.
+      # publishes no port, so the web container is the one peer that can
+      # reach it, and nginx replaces the header with the single client
+      # address it resolved. Real client IPs are what per-IP limits key on.
       FORWARDED_ALLOW_IPS: '*'
     depends_on:
       migrate:
@@ -109,10 +111,49 @@ services:
     build:
       context: ./frontend
       target: runtime
+    environment:
+      # The proxies in front of nginx whose X-Forwarded-For is believed: the
+      # TLS terminator's address (for Caddy on this host, the Docker bridge
+      # gateway, e.g. 172.16.0.0/12), plus Cloudflare's ranges if it is in
+      # front. Required: left empty behind a proxy, every visitor would share
+      # the proxy's address and one rate-limit bucket. See docs/deployment.md.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:?set TRUSTED_PROXY_CIDRS to the proxy addresses in front of nginx}
     ports:
       - '${WEB_HOST_PORT:-8080}:8080'
     depends_on:
       api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backup:
+    # Same major version as the server: pg_dump must not be older than it.
+    image: postgres:16-alpine
+    command: ['sh', '/deploy/backup.sh']
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-app}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-app}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./deploy:/deploy:ro
+      # A host directory, not a named volume, so shipping dumps off this
+      # machine is one rsync/rclone away. On the same disk as the database
+      # they survive a bad migration or a dropped table, not a lost server.
+      - ${BACKUP_HOST_DIR:-./backups}:/backups
+    healthcheck:
+      # Unhealthy once the newest finished dump is older than two intervals:
+      # a backup that silently stopped working shows up in `compose ps`.
+      test:
+        - CMD-SHELL
+        - 'test -n "$$(find /backups -name ''app-*.dump'' -mmin -$$((BACKUP_INTERVAL_SECONDS * 2 / 60)) | head -n 1)"'
+      interval: 5m
+      timeout: 10s
+      start_period: 2m
+      retries: 1
+    depends_on:
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 

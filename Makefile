@@ -11,7 +11,7 @@ COMPOSE := docker compose
 .PHONY: help dev rebuild down logs up-db check-db install migrate migration downgrade \
         test test-backend test-frontend e2e lint lint-backend lint-frontend \
         format format-check typecheck typecheck-backend typecheck-frontend \
-        openapi generate-client clean prod-up prod-down prod-logs eval eval-live e2e-install
+        openapi generate-client clean prod-up prod-down prod-logs prod-backup prod-restore loadtest eval eval-live e2e-install
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -58,6 +58,16 @@ prod-down: ## Stop the production stack (data volumes are kept)
 prod-logs: ## Follow production stack logs
 	$(PROD_COMPOSE) logs -f
 
+prod-backup: ## Dump the production database now (into BACKUP_HOST_DIR, default ./backups)
+	$(PROD_COMPOSE) run --rm backup sh /deploy/backup.sh once
+
+prod-restore: ## Restore a dump, replacing all data: make prod-restore file=app-<stamp>.dump confirm=yes
+	@test -n "$(file)" || { echo 'usage: make prod-restore file=app-<stamp>.dump confirm=yes'; exit 1; }
+	@test "$(confirm)" = yes || { echo 'this replaces every row written since the dump; add confirm=yes'; exit 1; }
+	$(PROD_COMPOSE) stop api
+	$(PROD_COMPOSE) run --rm backup sh /deploy/restore.sh /backups/$(file)
+	$(PROD_COMPOSE) start api
+
 # --- Database ----------------------------------------------------------------
 
 migrate: check-db ## Apply all migrations to the database in DATABASE_URL
@@ -82,6 +92,9 @@ test-frontend: ## Run Vitest
 
 e2e: check-db ## Run Playwright end-to-end tests (real app, scripted LLM and search)
 	cd $(FRONTEND) && npx playwright test
+
+loadtest: check-db ## Measure concurrent-chat capacity (real app, providers that wait like real ones)
+	cd $(BACKEND) && uv run python -m tests.load.run
 
 e2e-install: ## Download the Chromium build Playwright drives (once per machine)
 	cd $(FRONTEND) && npx playwright install chromium

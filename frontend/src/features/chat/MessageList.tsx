@@ -90,7 +90,11 @@ export function MessageList({
     <div
       ref={scrollRef}
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto"
+      // `relative` makes the thread the containing block for the absolutely
+      // positioned `sr-only` labels inside it. Without it they are placed
+      // against the page instead, escape this overflow, and give the whole
+      // page a second scrollbar.
+      className="relative flex-1 overflow-y-auto"
       data-testid="thread"
     >
       <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">

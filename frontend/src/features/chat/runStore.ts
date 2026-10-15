@@ -129,6 +129,23 @@ function describeFailure(error: unknown): LiveError {
         retryable: true,
       }
     }
+    if (error.is('email_not_verified')) {
+      return {
+        code: error.code,
+        message: 'Confirm your email address to start sending messages. Check your inbox.',
+        retryable: false,
+      }
+    }
+    if (error.is('daily_quota_exceeded')) {
+      const seconds = Number(error.details?.retry_after_seconds)
+      const hours = Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds / 3600) : null
+      const wait = hours === null ? '' : ` You can send more in about ${hours} h.`
+      return {
+        code: error.code,
+        message: `You have reached your daily message limit.${wait}`,
+        retryable: false,
+      }
+    }
     if (error.is('rate_limited')) {
       const seconds = Number(error.details?.retry_after_seconds)
       const wait = Number.isFinite(seconds) && seconds > 0 ? ` Try again in ${seconds}s.` : ''

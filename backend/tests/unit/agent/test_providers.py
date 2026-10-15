@@ -11,6 +11,7 @@ import pytest
 
 from app.core.config import Settings
 from app.providers.llm import (
+    LLMAuthError,
     LLMPermanentError,
     LLMTransientError,
     OpenAICompatibleLLM,
@@ -40,6 +41,17 @@ class TestLLMErrorClassification:
     def test_non_retryable_statuses(self, status: int) -> None:
         """Retrying a bad key or a rejected request only pays for it twice."""
         assert isinstance(classify_llm_error(_StatusError(status)), LLMPermanentError)
+
+    @pytest.mark.parametrize("status", [401, 403])
+    def test_rejected_credentials_are_their_own_kind(self, status: int) -> None:
+        """A bad key must be told apart from an outage, yet still never retried."""
+        error = classify_llm_error(_StatusError(status))
+        assert isinstance(error, LLMAuthError)
+        assert isinstance(error, LLMPermanentError)
+
+    @pytest.mark.parametrize("status", [400, 404, 422])
+    def test_other_rejections_are_not_auth_failures(self, status: int) -> None:
+        assert not isinstance(classify_llm_error(_StatusError(status)), LLMAuthError)
 
     def test_a_timeout_is_transient(self) -> None:
         assert isinstance(classify_llm_error(TimeoutError()), LLMTransientError)

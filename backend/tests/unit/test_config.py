@@ -83,6 +83,7 @@ def test_production_requires_redis() -> None:
         ({"log_level": "debug"}, "DEBUG"),
         ({"log_format": "console"}, "LOG_FORMAT"),
         ({"metrics_token": "short"}, "METRICS_TOKEN"),
+        ({"require_email_verification": False}, "REQUIRE_EMAIL_VERIFICATION"),
     ],
 )
 def test_production_rejects_development_conveniences(

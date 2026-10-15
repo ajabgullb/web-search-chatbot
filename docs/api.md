@@ -88,6 +88,8 @@ never in a response body — it is set as an `HttpOnly` cookie scoped to
 | POST | `/auth/logout-all` | Revoke every session (requires bearer token) | `200` |
 | POST | `/auth/forgot-password` | Request a reset link | `202` |
 | POST | `/auth/reset-password` | Consume a reset token | `200` |
+| POST | `/auth/verify-email` | Confirm an address with the emailed token (no session needed) | `200` |
+| POST | `/auth/resend-verification` | Email a fresh confirmation link (requires bearer token) | `202` |
 | GET | `/users/me` | The signed-in account | `200` |
 
 `POST /auth/register` and `/auth/login` return:
@@ -99,10 +101,17 @@ never in a response body — it is set as an `HttpOnly` cookie scoped to
   "expires_in": 900,
   "user": {
     "id": "...", "email": "...", "display_name": "...",
-    "is_active": true, "created_at": "..."
+    "is_active": true, "is_verified": false, "created_at": "..."
   }
 }
 ```
+
+Registration emails a confirmation link to
+`{FRONTEND_ORIGIN}/verify-email?token=...`. Until it is opened, the account can
+sign in and manage conversations, but starting a run returns `403
+email_not_verified`. The token is valid for `EMAIL_VERIFICATION_TTL_HOURS`
+(48) and may be used more than once. `resend-verification` is limited per
+account (`RATE_LIMIT_RESEND_VERIFICATION`, 3 per 5 minutes).
 
 ### Conversations
 
@@ -246,7 +255,8 @@ and increases by exactly one. Lines beginning with `:` are heartbeats (every
 | `run.cancelled` | `reason` | **Terminal.** `user_cancelled`, `client_disconnected`, or `conversation_deleted`. |
 
 Exactly one terminal event ends every stream. Failure codes: `llm_unavailable`,
-`run_timeout`, `run_interrupted` (server shutdown or a crashed process),
+`llm_auth_failed` (the model provider rejected the server's key; not
+retryable), `run_timeout`, `run_interrupted` (server shutdown or a crashed process),
 `internal_error`. A searched answer that could not be verified is not a
 failure: it completes with `message.degraded: true`.
 
@@ -294,11 +304,13 @@ is set only when `failed`; `cancel_reason` only when `cancelled`.
 | `validation_failed` | 422 | Body failed validation; `details.fields` lists the failures |
 | `authentication_required` | 401 | Missing, invalid, or expired access token |
 | `invalid_credentials` | 401 | Wrong email or password — identical for an unknown account |
-| `invalid_token` | 401 | Refresh or reset token missing, expired, or already used |
+| `invalid_token` | 401 | Refresh, reset, or email-confirmation token missing, expired, or already used |
 | `account_inactive` | 403 | The account has been deactivated |
 | `origin_not_allowed` | 403 | Cross-site request to a cookie-authenticated route |
 | `email_already_registered` | 409 | Registration conflict |
 | `rate_limited` | 429 | Too many attempts or runs; see `Retry-After` and `details.retry_after_seconds` |
+| `daily_quota_exceeded` | 429 | `DAILY_RUN_LIMIT_PER_USER` runs started in the last 24 hours; `details` has `limit` and `retry_after_seconds` (also `Retry-After`) |
+| `email_not_verified` | 403 | Runs need a confirmed email address |
 | `conversation_not_found` | 404 | Unknown id, or one owned by another user — deliberately the same |
 | `run_not_found` | 404 | Unknown run, another user's run, or one in a deleted conversation |
 | `message_not_found` | 404 | A retry named a message that is not a user message in this conversation |
@@ -309,5 +321,5 @@ is set only when `failed`; `cancel_reason` only when `cancelled`.
 | `message_too_long` | 422 | Over `MAX_USER_MESSAGE_CHARS`; `details` has the limit and length |
 | `invalid_cursor` | 400 | Pagination cursor was not produced by this API |
 | `payload_too_large` | 413 | Body over `MAX_REQUEST_BODY_BYTES`; `details.max_bytes` when the size was declared |
-| `service_unavailable` | 503 | A required dependency (Redis, for run creation) is down; retry shortly |
+| `service_unavailable` | 503 | A required dependency (Redis for run creation, SMTP for resending a confirmation) is down; retry shortly |
 | `internal_error` | 500 | Unexpected failure; quote `request_id` |

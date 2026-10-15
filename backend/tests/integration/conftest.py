@@ -19,6 +19,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import Settings
+from app.core.security import normalize_email
 from app.db.session import Database
 from app.models.message import MessageRole
 from app.repositories.users import UserRepository
@@ -110,14 +111,39 @@ async def register(
     email: str = "user@example.com",
     password: str = REGISTER_PASSWORD,
     display_name: str = "Test User",
+    verified: bool = True,
 ) -> dict[str, Any]:
-    """Register an account and return the token payload."""
+    """Register an account and return the token payload.
+
+    Verified by default, because most tests are about what an account can do
+    once it is allowed to; ``verified=False`` leaves it as registration does.
+    The token payload still describes the account as registered (unverified).
+    """
     response = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": password, "display_name": display_name},
     )
     assert response.status_code == 201, response.text
+    if verified:
+        await mark_verified(email)
     return dict(response.json())
+
+
+async def mark_verified(email: str) -> None:
+    """Stand-in for clicking the emailed link.
+
+    The link itself is covered end to end in ``test_email_verification``;
+    everywhere else, going through it would only add noise.
+    """
+    engine = create_async_engine(TEST_DATABASE_URL)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text("UPDATE users SET is_verified = true WHERE email = :email"),
+                {"email": normalize_email(email)},
+            )
+    finally:
+        await engine.dispose()
 
 
 def auth_header(tokens: dict[str, Any]) -> dict[str, str]:

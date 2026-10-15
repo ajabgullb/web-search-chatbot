@@ -46,6 +46,9 @@ class RunCreate(BaseModel):
 # user-facing sentence about a failure is written here, by us.
 _ERROR_MESSAGES: dict[str, str] = {
     "llm_unavailable": "The language model is unavailable. Please try again.",
+    # Deliberately vague about why: a user cannot fix a server's API key, and
+    # the precise cause belongs in the operator's log, not on the screen.
+    "llm_auth_failed": "The assistant is misconfigured and cannot answer right now.",
     "search_unavailable": "Web search is unavailable. Please try again.",
     "run_timeout": "The assistant took too long to answer. Please try again.",
     "run_interrupted": "The answer was interrupted before it finished. Please try again.",

@@ -7,13 +7,16 @@ belongs to the model and not to us.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
+
+import pytest
 
 from app.agent.context import AgentLimits
 from app.agent.nodes import NO_SOURCES_NOTICE, SEARCH_UNAVAILABLE_NOTICE
 from app.agent.routing import SearchDecision
-from app.providers.llm import LLMPermanentError, LLMTransientError
+from app.providers.llm import LLMAuthError, LLMPermanentError, LLMTransientError
 from app.providers.search import SearchPermanentError, SearchTransientError
 from tests.fakes import FakeLLM, FakeSearchProvider, hit
 
@@ -199,11 +202,25 @@ class TestModelFailures:
         assert result.error["retryable"] is True
 
     async def test_a_permanent_model_error_is_not_retryable(self, run: Run) -> None:
-        llm = FakeLLM(answer_error=LLMPermanentError("401"))
+        llm = FakeLLM(answer_error=LLMPermanentError("400"))
         result = await run("hello", llm=llm, search=FakeSearchProvider())
 
         assert result.error is not None
+        assert result.error["code"] == "llm_unavailable"
         assert result.error["retryable"] is False
+
+    async def test_rejected_credentials_fail_with_their_own_code(
+        self, run: Run, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A bad key reads differently from an outage — to the client and in the log."""
+        llm = FakeLLM(answer_error=LLMAuthError("401"))
+        with caplog.at_level(logging.WARNING, logger="app.agent.nodes"):
+            result = await run("hello", llm=llm, search=FakeSearchProvider())
+
+        assert result.error is not None
+        assert result.error["code"] == "llm_auth_failed"
+        assert result.error["retryable"] is False
+        assert [r.message for r in caplog.records] == ["llm_auth_failed"]
 
     async def test_a_failed_decision_call_falls_back_to_answering(self, run: Run) -> None:
         """The classifier failing must not fail the run."""

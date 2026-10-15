@@ -52,6 +52,14 @@ class LLMPermanentError(LLMError):
     """Bad credentials, a rejected request, or exhausted quota."""
 
 
+class LLMAuthError(LLMPermanentError):
+    """The provider rejected our credentials (401/403).
+
+    Split out from other permanent failures because the fix is an operator's,
+    not a user's: an outage clears up on its own, a revoked key never does.
+    """
+
+
 class LLMProvider(Protocol):
     @property
     def model(self) -> str: ...
@@ -75,6 +83,7 @@ class LLMProvider(Protocol):
 # HTTP statuses worth retrying. Everything else is the caller's fault or a
 # quota wall, and a retry would just pay for the same error twice.
 _TRANSIENT_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+_AUTH_STATUSES = frozenset({401, 403})
 
 # Matched against the exception class name so that this module does not import
 # the provider SDK's exception hierarchy just to classify a failure.
@@ -95,6 +104,8 @@ def classify_llm_error(exc: Exception) -> LLMError:
     if isinstance(status, int):
         if status in _TRANSIENT_STATUSES:
             return LLMTransientError(f"llm provider returned {status}")
+        if status in _AUTH_STATUSES:
+            return LLMAuthError(f"llm provider rejected the credentials ({status})")
         return LLMPermanentError(f"llm provider returned {status}")
 
     name = type(exc).__name__.lower()

@@ -51,6 +51,13 @@ const oneConversation = {
 }
 
 describe('the conversation sidebar', () => {
+  it('greets the user by first name on the chat home', async () => {
+    stubApi(oneConversation)
+    renderApp(<App />, { route: '/chat' })
+    // testUser is "Test User".
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent(/\bTest\b/)
+  })
+
   it('lists the user’s conversations', async () => {
     stubApi(oneConversation)
     renderApp(<App />, { route: '/chat' })

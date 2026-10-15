@@ -94,6 +94,21 @@ class RateLimited(AppError):
     message = "Too many requests. Try again shortly."
 
 
+class DailyQuotaExceeded(AppError):
+    """Distinct from ``rate_limited``: waiting a few seconds will not help, and
+    the client should say so rather than offer an immediate retry."""
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    code = "daily_quota_exceeded"
+    message = "You have reached the daily message limit."
+
+
+class EmailNotVerified(AppError):
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "email_not_verified"
+    message = "Verify your email address to start sending messages."
+
+
 class PayloadTooLarge(AppError):
     status_code = status.HTTP_413_CONTENT_TOO_LARGE
     code = "payload_too_large"
