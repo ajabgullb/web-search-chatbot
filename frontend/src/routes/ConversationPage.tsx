@@ -10,6 +10,8 @@ import { ApiError } from '@/api/errors'
 import { Alert } from '@/components/ui/Alert'
 import { FullPageSpinner } from '@/components/FullPageSpinner'
 import { Composer } from '@/features/chat/Composer'
+import { DocumentChips } from '@/features/chat/DocumentAttachments'
+import { PDF_ACCEPT, useDocumentAttachments } from '@/features/chat/useDocumentAttachments'
 import { LiveTurn, UnansweredNotice } from '@/features/chat/LiveTurn'
 import { MessageList } from '@/features/chat/MessageList'
 import { useConversation, useMessages } from '@/features/chat/queries'
@@ -22,6 +24,7 @@ export function ConversationPage() {
   const messages = useMessages(conversationId)
   const store = useRunStore()
   const live = useLiveRun(conversationId)
+  const attachments = useDocumentAttachments(conversationId)
 
   const activeRunId = conversation.data?.active_run_id ?? null
 
@@ -91,6 +94,10 @@ export function ConversationPage() {
         running={running}
         stopping={live?.stopping ?? false}
         onStop={() => void store.stop(conversationId)}
+        onAttach={attachments.attach}
+        attaching={attachments.uploading}
+        accept={PDF_ACCEPT}
+        attachments={<DocumentChips attachments={attachments} running={running} />}
       />
     </main>
   )

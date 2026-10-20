@@ -13,7 +13,11 @@ export const chatKeys = {
   conversations: ['conversations'] as const,
   conversation: (id: string) => ['conversations', id] as const,
   messages: (id: string) => ['conversations', id, 'messages'] as const,
+  documents: (id: string) => ['conversations', id, 'documents'] as const,
 }
+
+/** How often to re-check while a document is still being prepared. */
+export const DOCUMENT_POLL_MS = 1_500
 
 /**
  * The sidebar list.
@@ -66,6 +70,45 @@ export function useMessages(id: string | undefined) {
         .reverse()
         .flatMap((page) => page.items),
     }),
+  })
+}
+
+/**
+ * The conversation's documents.
+ *
+ * Polls only while one is still `processing`: embedding happens in the
+ * background after the upload returns, and there is no event stream for it.
+ * Once everything is `ready` or `failed` the list goes quiet.
+ */
+export function useDocuments(conversationId: string | undefined) {
+  return useQuery({
+    queryKey: chatKeys.documents(conversationId ?? ''),
+    queryFn: () => chatApi.listDocuments(conversationId as string),
+    enabled: conversationId !== undefined,
+    refetchInterval: (query) =>
+      query.state.data?.items.some((document) => document.status === 'processing')
+        ? DOCUMENT_POLL_MS
+        : false,
+  })
+}
+
+export function useUploadDocument(conversationId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => chatApi.uploadDocument(conversationId, file),
+    // Refetched rather than patched: a duplicate upload returns an existing
+    // document, and the server's list is the one source of order.
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: chatKeys.documents(conversationId) }),
+  })
+}
+
+export function useDeleteDocument(conversationId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (documentId: string) => chatApi.deleteDocument(conversationId, documentId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: chatKeys.documents(conversationId) }),
   })
 }
 

@@ -54,6 +54,11 @@ let refreshInFlight: Promise<string | null> | null = null
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
   body?: unknown
+  /**
+   * A multipart body (file upload), sent instead of `body`. Content-Type is
+   * left to the browser, which must add the multipart boundary itself.
+   */
+  form?: FormData
   /** Set false on auth endpoints that must not trigger a refresh. */
   retryOnUnauthorized?: boolean
   signal?: AbortSignal
@@ -98,8 +103,13 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
       // Sends the HttpOnly refresh cookie on the /auth routes it is scoped to.
       credentials: 'include',
       // Spread rather than assign undefined: `exactOptionalPropertyTypes`
-      // distinguishes "absent" from "present and undefined".
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+      // distinguishes "absent" from "present and undefined". A FormData body
+      // can be sent again as is, so the replay after a refresh still works.
+      ...(options.form
+        ? { body: options.form }
+        : options.body === undefined
+          ? {}
+          : { body: JSON.stringify(options.body) }),
       ...(options.signal ? { signal: options.signal } : {}),
     })
   } catch (cause) {

@@ -9,5 +9,13 @@
  */
 export const MAX_MESSAGE_CHARACTERS = 16_000
 
+/**
+ * Mirrors `Settings.max_document_bytes` (MAX_DOCUMENT_BYTES): 10 MiB.
+ *
+ * Same reasoning as the character limit: checked here so a 40 MB scan is
+ * refused before it is uploaded, not after. A backend test pins the two.
+ */
+export const MAX_DOCUMENT_BYTES = 10_485_760
+
 /** Show the counter only when it starts to matter. */
 export const COUNTER_VISIBLE_FROM = MAX_MESSAGE_CHARACTERS - 2_000
