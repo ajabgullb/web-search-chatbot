@@ -28,7 +28,7 @@ RUN npm run build
 # The unprivileged variant of the official image: it runs as uid 101 with its
 # pid and temp files in writable paths. Stock nginx:alpine under `USER nginx`
 # cannot start, because its master process writes to root-owned paths.
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
 # Where /api/ is proxied, and the DNS server that resolves it (Docker's
 # embedded resolver). Override both outside Docker Compose.
 ENV API_UPSTREAM=http://api:8000 \
