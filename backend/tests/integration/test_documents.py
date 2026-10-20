@@ -27,8 +27,8 @@ from app.providers.embeddings import (
     EmbeddingBatch,
     EmbeddingTransientError,
 )
-from app.repositories.documents import DocumentRepository
-from app.services import ingestion
+from app.repositories.documents import DocumentRepository, vector_literals
+from app.services import embedding_calls
 from tests.fakes import FakeEmbeddings, FakeLLM
 from tests.integration.conftest import auth_header, create_conversation, register
 from tests.integration.runs_support import install_providers, post_run, wait_for_active_run
@@ -429,7 +429,7 @@ class TestIngestion:
         manual_ingestion: Any,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(ingestion, "RETRY_BACKOFF_SECONDS", 0.0)
+        monkeypatch.setattr(embedding_calls, "RETRY_BACKOFF_SECONDS", 0.0)
         failing = FakeEmbeddings(error=EmbeddingTransientError("503"))
         app.state.embedding_provider = failing
         document_id = (await upload(client, headers, conversation_id)).json()["id"]
@@ -473,7 +473,8 @@ class TestIngestion:
             claimed = await repository.claim_next(now=datetime.now(UTC), lease=timedelta(minutes=5))
             assert claimed is not None and claimed.id == document_id
             first = (await repository.pending_chunks(document_id=document_id, limit=1))[0]
-            await repository.store_embeddings(vectors=[(first.id, embeddings.vector("one"))])
+            [literal] = vector_literals([embeddings.vector("one")])
+            await repository.store_embeddings(literals=[(first.id, literal)])
             await session.commit()
 
         # Still leased to the dead worker: nobody else may take it yet.

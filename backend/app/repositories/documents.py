@@ -20,6 +20,7 @@ from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import (
     CursorResult,
     Table,
+    Text,
     and_,
     bindparam,
     delete,
@@ -29,6 +30,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy import cast as sql_cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.tools.documents import ChunkCandidate
@@ -39,6 +41,12 @@ from app.models.embedding_usage import EmbeddingPurpose, EmbeddingUsage
 # Rough tokens per character of English text, for estimating what an upload
 # will cost before it is embedded. The ledger records the real count.
 CHARS_PER_TOKEN = 4
+
+
+def vector_literals(vectors: Sequence[list[float]]) -> list[str]:
+    """pgvector's text form, exactly as its own encoder writes it. CPU-bound:
+    call it through ``asyncio.to_thread``."""
+    return ["[" + ",".join([str(float(value)) for value in vector]) + "]" for vector in vectors]
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,22 +333,32 @@ class DocumentRepository:
         )
         return [PendingChunk(id=row[0], content=row[1]) for row in result]
 
-    async def store_embeddings(self, *, vectors: Sequence[tuple[uuid.UUID, list[float]]]) -> None:
-        """Write one batch. A chunk deleted meanwhile is simply not updated.
+    async def store_embeddings(self, *, literals: Sequence[tuple[uuid.UUID, str]]) -> None:
+        """Write one batch of vectors, given as pgvector text (``vector_literals``).
+
+        Text rather than lists, cast in SQL: turning 100 vectors of 1,536
+        floats into text takes about 110 ms, and done by pgvector's bind
+        processor it happens on the event loop. The caller formats them in a
+        thread instead.
 
         Core ``executemany`` rather than ORM bulk update: the ORM checks that
         every row it was told about still exists, and a document deleted while
-        it was being embedded is a normal event here, not an error.
+        it was being embedded is a normal event here, not an error. A chunk
+        deleted meanwhile is simply not updated.
         """
         # Declarative models are typed with a generic FromClause; it is a Table.
         table = cast(Table, DocumentChunk.__table__)
         statement = (
             update(table)
             .where(table.c.id == bindparam("chunk_id"))
-            .values(embedding=bindparam("vector", type_=VECTOR(EMBEDDING_VECTOR_DIMENSIONS)))
+            .values(
+                embedding=sql_cast(
+                    bindparam("vector", type_=Text), VECTOR(EMBEDDING_VECTOR_DIMENSIONS)
+                )
+            )
         )
         await self._session.execute(
-            statement, [{"chunk_id": chunk_id, "vector": vector} for chunk_id, vector in vectors]
+            statement, [{"chunk_id": chunk_id, "vector": text} for chunk_id, text in literals]
         )
 
     async def lock_for_batch(

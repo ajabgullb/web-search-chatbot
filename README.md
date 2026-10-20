@@ -5,10 +5,11 @@ when that helps, streams its answer, keeps conversation history, and cites its
 sources.
 
 - [`AGENTS.md`](./AGENTS.md) — the implementation contract.
-- [`PLAN.md`](./PLAN.md) — the nine-phase roadmap and per-phase definition of done.
+- [`PLAN.md`](./PLAN.md) — the phased roadmap and per-phase definition of done.
 - [`docs/`](./docs) — architecture, API, security, and decision records.
 
-**Status: all nine phases of [`PLAN.md`](./PLAN.md) are implemented.**
+**Status: every phase of [`PLAN.md`](./PLAN.md) is implemented, including
+Phase 11, PDF documents.**
 
 - **Accounts.** Register, confirm your email, sign in, stay signed in across
   reloads, reset a password. Each account may start up to 100 answers a day.
@@ -16,6 +17,11 @@ sources.
 - **Answers.** Asking a question streams the answer with live search
   progress, inline citation buttons, and source cards. You can stop an
   answer, retry it, or reload mid-answer.
+- **Documents.** Attach PDFs to a conversation with the paperclip in the
+  message box. Answers in that conversation read them and cite them by page,
+  alongside the web where that helps. A document belongs to one conversation;
+  removing it, or the conversation, deletes its text
+  ([ADR-0015](docs/adr/0015-chat-scoped-pdf-retrieval.md)).
 - **Production.** The production stack coordinates through Redis, logs
   structured JSON, exposes Prometheus metrics, shuts down gracefully, and
   refuses to start on an unsafe configuration.
@@ -25,7 +31,9 @@ sources.
 No provider key is needed to run the app or the tests. To get real answers, set
 `LLM_API_KEY` (and `LLM_BASE_URL`/`LLM_MODEL` for a non-OpenAI endpoint such as
 Ollama) and `SEARCH_API_KEY` in `.env`; production refuses to start without
-them.
+them. PDF documents are embedded with OpenAI's `text-embedding-3-small`: an
+OpenAI `LLM_API_KEY` covers that too, and any other chat provider needs
+`EMBEDDING_API_KEY` as well.
 
 ## Stack
 

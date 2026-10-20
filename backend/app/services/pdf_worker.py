@@ -6,9 +6,13 @@ crafted file can loop, or allocate until the machine swaps. In a child it can
 be killed when it overruns its deadline, and an address-space limit makes it
 fail with ``MemoryError`` long before it endangers the host.
 
-Imports are limited to the standard library and ``pypdf`` on purpose. The
-forkserver preloads this module, so every child starts with exactly this and
-nothing else: no settings, no secrets, no open sockets.
+Chunking runs here too, for the same reason: it is CPU-bound work on
+attacker-sized input (up to 500,000 characters). Measured on the event loop
+it cost 19 ms per maximum-size document; here it costs the API nothing.
+
+Imports are limited to the standard library, ``pypdf``, and the pure chunking
+module on purpose. The forkserver preloads this module, so every child starts
+with exactly this and nothing else: no settings, no secrets, no open sockets.
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ import resource
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 from typing import Literal
+
+from app.services.chunking import chunk_pages
 
 # Codes, not messages: the parent maps them onto API errors. Kept as plain
 # strings so the reply pickles without importing anything from the app.
@@ -37,6 +43,14 @@ class ParseLimits:
     max_pages: int
     max_chars: int
     memory_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedPdf:
+    """What a readable PDF yields: its page count and its chunks as (page, text)."""
+
+    page_count: int
+    chunks: list[tuple[int, str]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +115,18 @@ def extract_pages(data: bytes, limits: ParseLimits) -> list[str] | ParseFailure:
     return pages
 
 
+def parse_document(data: bytes, limits: ParseLimits) -> ParsedPdf | ParseFailure:
+    """Pages, then chunks: everything an upload needs from the file."""
+    pages = extract_pages(data, limits)
+    if isinstance(pages, ParseFailure):
+        return pages
+    chunks = chunk_pages(pages)
+    if not chunks:
+        # Text that normalizes to nothing: whitespace and control characters.
+        return ParseFailure("pdf_no_text")
+    return ParsedPdf(page_count=len(pages), chunks=[(c.page, c.content) for c in chunks])
+
+
 def run_in_child(data: bytes, limits: ParseLimits, reply: Connection) -> None:
     """Child-process entry point: cap memory, parse, send one reply, exit."""
     try:
@@ -108,7 +134,7 @@ def run_in_child(data: bytes, limits: ParseLimits, reply: Connection) -> None:
         # enforces at allocation time, so an allocation over it fails inside
         # Python (as MemoryError) instead of the process being OOM-killed.
         resource.setrlimit(resource.RLIMIT_AS, (limits.memory_bytes, limits.memory_bytes))
-        result: list[str] | ParseFailure = extract_pages(data, limits)
+        result: ParsedPdf | ParseFailure = parse_document(data, limits)
     except MemoryError:
         result = ParseFailure("pdf_too_complex")
     try:

@@ -95,6 +95,43 @@ while the event loop keeps serving.
 Registration ran at about 10-11 accounts a second, bounded by the two-thread
 hashing pool (each hash already uses four cores' worth of lanes).
 
+## PDF uploads while answering (2026-10-20)
+
+25 users chatting, then the same 25 while unique 30-page PDFs (51 KB, about
+42,000 characters each) are uploaded at **2 per second**, each parsed for real
+and embedded by a stand-in that waits 0.3 s per request. That is far beyond
+real use: each account may upload 10 documents in 10 minutes.
+
+```bash
+uv run python -m tests.load.run --levels 25 --duration 30 --storm-users 25 \
+    --login-rate 0 --upload-rate 2 --login-users 40
+```
+
+The first run found work still on the event loop. Parsing was not it (it
+runs in a child process); measured at the largest document allowed, the event
+loop was paying for turning vectors into SQL text (110 ms per batch of 100),
+hashing the upload (33 ms for 10 MiB), and chunking (19 ms). Vectors are now
+formatted in a thread and cast in SQL, hashing runs in a thread (hashlib
+releases the GIL), and chunking moved into the parsing child.
+
+| 25 users | no uploads | + 2 uploads/s, before | + 2 uploads/s, after |
+| --- | ---: | ---: | ---: |
+| answers/min | 280 | 264 | 275 |
+| first-token overhead p50 | 0.16-0.23 s | 0.37 s | 0.26 s |
+| first-token overhead p95 | 0.79-1.29 s | 0.89 s | 0.85 s |
+| probe p95 | 21-22 ms | 64 ms | 48 ms |
+| probe max | 118-174 ms | 164 ms | 97 ms |
+| upload p95 (request accepted) | | 0.58 s | 0.28 s |
+| failed answers, refused uploads | 0 | 0 | 0 |
+
+Two uploads a second now add about 30 ms to the typical time to first token,
+and nothing to the slowest. Part of the remaining probe rise is the stand-in
+embedder computing its vectors inside the API process; the real provider
+does that work on its own servers. The server CPU column covers the uvicorn
+process only, so it does not include the parsing children. The p95 overhead
+varies by several hundred milliseconds between identical phases on this
+shared laptop, which is why each comparison is a pair run back to back.
+
 ## Scaling past one process
 
 Every piece of coordination (run locks, rate limits, cancellation, the daily

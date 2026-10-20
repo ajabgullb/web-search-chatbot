@@ -8,11 +8,13 @@ application logs as it would be written, and searches it for each secret.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 
 import pytest
 from fastapi import FastAPI
@@ -21,9 +23,15 @@ from httpx import AsyncClient
 from app.agent.routing import SearchDecision
 from app.core.logging import JsonFormatter, user_ref
 from tests.conftest import TEST_ORIGIN
-from tests.fakes import FakeLLM, FakeSearchProvider, hit
-from tests.integration.conftest import REGISTER_PASSWORD, create_conversation, register
+from tests.fakes import FakeEmbeddings, FakeLLM, FakeSearchProvider, hit
+from tests.integration.conftest import (
+    REGISTER_PASSWORD,
+    auth_header,
+    create_conversation,
+    register,
+)
 from tests.integration.runs_support import install_providers, parse_sse, post_run
+from tests.pdfs import make_pdf
 
 pytestmark = pytest.mark.integration
 
@@ -113,3 +121,62 @@ async def test_a_full_session_leaves_no_secrets_or_content_in_the_logs(
 
     requests = [line for line in lines if line["event"] == "http_request"]
     assert any(line["path"].endswith("/runs") and line["status"] == 200 for line in requests)
+
+
+async def test_a_document_session_leaves_no_document_content_in_the_logs(
+    app: FastAPI, client: AsyncClient, captured_logs: io.StringIO
+) -> None:
+    """ADR-0015: logs carry document ids, never a document's text, its
+    filename (which can be private in itself), or what was asked of it."""
+    await app.state.embedding_provider.aclose()
+    app.state.embedding_provider = FakeEmbeddings()
+    app.state.agent_limits = replace(app.state.agent_limits, document_min_similarity=0.05)
+    await install_providers(app, llm=FakeLLM(answers=["quokka-answer-marker: it grew [D1]."]))
+    headers = auth_header(await register(client, email="hygiene-docs@example.com"))
+    conversation_id = str((await create_conversation(client, headers))["id"])
+
+    uploaded = await client.post(
+        f"/api/v1/conversations/{conversation_id}/documents",
+        files={
+            "file": (
+                "tapir-filename-marker-divorce-settlement.pdf",
+                make_pdf(["axolotl-text-marker: quarterly revenue grew twelve percent."]),
+                "application/pdf",
+            )
+        },
+        headers=headers,
+    )
+    document_id = uploaded.json()["id"]
+    async with asyncio.timeout(15):
+        while (
+            await client.get(
+                f"/api/v1/conversations/{conversation_id}/documents/{document_id}",
+                headers=headers,
+            )
+        ).json()["status"] == "processing":
+            await asyncio.sleep(0.05)
+    run = await post_run(
+        client,
+        headers,
+        conversation_id,
+        content="pangolin-question-marker: what does the report say about quarterly revenue?",
+    )
+    await client.delete(
+        f"/api/v1/conversations/{conversation_id}/documents/{document_id}", headers=headers
+    )
+
+    assert parse_sse(run.text).terminal["type"] == "message.completed"
+    output = captured_logs.getvalue()
+    for name, marker in {
+        "document text": "axolotl-text-marker",
+        "document filename": "tapir-filename-marker",
+        "question": "pangolin-question-marker",
+        "answer": "quokka-answer-marker",
+    }.items():
+        assert marker not in output, f"{name} leaked into the logs"
+
+    # The lines that should be there identify the document by id only.
+    events = {line["event"]: line for line in map(json.loads, output.splitlines())}
+    for event in ("document_uploaded", "document_ready", "document_search", "document_deleted"):
+        assert event in events, f"{event} was not logged"
+    assert events["document_uploaded"]["document_id"] == document_id

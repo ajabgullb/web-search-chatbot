@@ -18,8 +18,11 @@ provider delays *subtracted*, so what remains is this server's own overhead:
   search and first-token delays (1.8 s with a search, 0.8 s without);
 - **probe latency**: how responsive the process stayed.
 
-A final phase repeats one level while users sign in at a steady rate, to show
-whether password hashing disturbs the streams.
+Two final phase pairs repeat one level while users sign in, then while users
+upload PDFs, at a steady rate. Each pair is measured with and without the
+extra load, to show whether password hashing or PDF parsing disturbs the
+streams. Parsing runs in child processes, so the server CPU column (the
+uvicorn process only) does not include it; that is the point of them.
 
 The driver and the server share the machine, so the driver's own CPU use is
 part of the result: on a dedicated server the API has more headroom than this
@@ -45,6 +48,7 @@ from typing import Any
 import httpx
 
 from tests.load.server import FIRST_TOKEN_SECONDS, SEARCH_SECONDS
+from tests.pdfs import make_pdf
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 PASSWORD = "correct-horse-battery-staple"
@@ -77,6 +81,8 @@ class LevelResult:
     cpu_percent: list[float] = field(default_factory=list)
     rss_mb: list[float] = field(default_factory=list)
     logins: list[float] = field(default_factory=list)
+    uploads: list[float] = field(default_factory=list)
+    upload_errors: dict[str, int] = field(default_factory=dict)
 
 
 def percentile(values: list[float], pct: float) -> float | None:
@@ -281,6 +287,56 @@ async def login_storm(
     await asyncio.gather(*tasks)
 
 
+# A realistic report: 30 pages of ordinary prose, about 1,400 characters each.
+_PAGE = (
+    "The committee reviewed quarterly results across every region and noted that "
+    "revenue, margins, and headcount moved in line with the plan agreed in spring. "
+) * 9
+
+
+def upload_pdf() -> bytes:
+    """A unique PDF each time, so duplicate detection never skips the work."""
+    marker = uuid.uuid4().hex
+    return make_pdf([f"Report {marker}, page {n}. {_PAGE}" for n in range(1, 31)])
+
+
+async def upload_storm(
+    client: httpx.AsyncClient,
+    users: list[User],
+    result: LevelResult,
+    *,
+    rate: float,
+    stop_at: float,
+) -> None:
+    """Upload a fresh 30-page PDF at ``rate`` per second, each into a new
+    conversation (a conversation holds five at most), rotating accounts."""
+    index = 0
+
+    async def one(user: User) -> None:
+        headers = {"Authorization": f"Bearer {user.token}"}
+        conversation = await client.post("/api/v1/conversations", json={}, headers=headers)
+        started = time.monotonic()
+        response = await client.post(
+            f"/api/v1/conversations/{conversation.json()['id']}/documents",
+            files={"file": ("report.pdf", upload_pdf(), "application/pdf")},
+            headers=headers,
+        )
+        if response.status_code == 202:
+            result.uploads.append(time.monotonic() - started)
+        else:
+            code = f"upload_{response.status_code}:{response.json()['error']['code']}"
+            result.upload_errors[code] = result.upload_errors.get(code, 0) + 1
+
+    tasks: set[asyncio.Task[None]] = set()
+    while time.monotonic() < stop_at:
+        task = asyncio.create_task(one(users[index % len(users)]))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+        index += 1
+        await asyncio.sleep(1 / rate)
+    await asyncio.gather(*tasks)
+
+
 async def run_level(
     client: httpx.AsyncClient,
     sampler: ProcessSampler,
@@ -291,6 +347,7 @@ async def run_level(
     think: float,
     login_users: list[User] | None = None,
     login_rate: float = 0.0,
+    upload_rate: float = 0.0,
 ) -> LevelResult:
     result = LevelResult(name=name, users=len(users), seconds=duration)
     sampler.sample()  # reset the CPU baseline
@@ -303,6 +360,8 @@ async def run_level(
     tasks.append(sample_process(sampler, result, stop_at))
     if login_users and login_rate:
         tasks.append(login_storm(client, login_users, result, rate=login_rate, stop_at=stop_at))
+    if login_users and upload_rate:
+        tasks.append(upload_storm(client, login_users, result, rate=upload_rate, stop_at=stop_at))
     began = time.monotonic()
     await asyncio.gather(*tasks)
     # Users finish the run they are in after stop_at; count the real span.
@@ -346,6 +405,10 @@ def summarize(result: LevelResult) -> dict[str, Any]:
         "rss_max_mb": max(result.rss_mb) if result.rss_mb else None,
         "logins": len(result.logins),
         "login_p95": percentile(result.logins, 95),
+        "uploads": len(result.uploads),
+        "upload_p50": percentile(result.uploads, 50),
+        "upload_p95": percentile(result.uploads, 95),
+        "upload_errors": result.upload_errors,
     }
 
 
@@ -469,6 +532,39 @@ async def main(args: argparse.Namespace) -> int:
                             flush=True,
                         )
 
+            if args.storm_users and args.upload_rate:
+                users_for_storm = stream_users[: args.storm_users]
+                for name, rate in (
+                    (f"{args.storm_users} users, no uploads", 0.0),
+                    (
+                        f"{args.storm_users} users + {args.upload_rate:g} uploads/s",
+                        args.upload_rate,
+                    ),
+                ):
+                    result = await run_level(
+                        client,
+                        sampler,
+                        users_for_storm,
+                        name=name,
+                        duration=args.duration,
+                        think=args.think,
+                        login_users=login_users,
+                        upload_rate=rate,
+                    )
+                    summary = summarize(result)
+                    summaries.append(summary)
+                    print_row(summary)
+                    if rate:
+                        errors = ", ".join(
+                            f"{code} x{count}" for code, count in summary["upload_errors"].items()
+                        )
+                        print(
+                            f"  uploads accepted: {summary['uploads']}, "
+                            f"p50 {fmt(summary['upload_p50'])}, p95 {fmt(summary['upload_p95'])}"
+                            f"; refused: {errors or 'none'}",
+                            flush=True,
+                        )
+
             sustainable = [
                 s["users"]
                 for s in summaries
@@ -506,6 +602,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--storm-users", type=int, default=50, help="users during the sign-ins")
     parser.add_argument("--login-rate", type=float, default=5.0, help="sign-ins per second")
     parser.add_argument("--login-users", type=int, default=100, help="accounts used to sign in")
+    parser.add_argument(
+        "--upload-rate", type=float, default=1.0, help="30-page PDF uploads per second"
+    )
     parser.add_argument("--out", help="write the per-phase summary as JSON")
     return parser.parse_args()
 

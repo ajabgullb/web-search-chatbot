@@ -349,6 +349,13 @@ and `kind`, `page`, and `document_id` on the `citation` event.
   (`app/db/migrations_helpers.py`): a database whose recorded collation
   version is NULL while the server reports one was created under musl and
   reattached.
+- Measured under load (`docs/load-testing.md`, 2026-10-20): the first run
+  found CPU work left on the event loop (vector formatting, hashing,
+  chunking), which moved to a thread or the parsing child. Afterwards, two
+  30-page uploads a second added about 30 ms to the typical time to first
+  token of 25 concurrent answers.
+- Metrics cover uploads by outcome, parse time, ingestion outcomes, embedding
+  calls and tokens by purpose, and retrieval outcomes (`docs/api.md`).
 - CI never calls OpenAI. A deterministic fake embedder hashes word tokens into
   a fixed-size vector, so lexically related text scores as similar and
   retrieval tests are meaningful without a model.

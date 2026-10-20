@@ -66,9 +66,22 @@ over an isolated network path.
 | `run_time_to_first_token_seconds` | histogram | |
 | `llm_tokens_total` | counter | `kind` (`prompt`, `completion`) |
 | `search_requests_total`, `search_request_duration_seconds` | counter, histogram | `outcome` (`ok`, `transient_error`, `timeout`, `permanent_error`) |
-| `provider_failures_total` | counter | `provider` (`llm`, `search`), `kind` |
-| `rate_limit_hits_total` | counter | `bucket` (`login`, `register`, `forgot_password`, `runs`) |
+| `provider_failures_total` | counter | `provider` (`llm`, `search`, `embeddings`), `kind` |
+| `rate_limit_hits_total` | counter | `bucket` (`login`, `register`, `forgot_password`, `runs`, `document_uploads`, `embedding_quota`, …) |
+| `document_uploads_total` | counter | `outcome` (`accepted`, `duplicate`, or the refusal's error code, e.g. `pdf_invalid`) |
+| `pdf_parse_duration_seconds` | histogram | `outcome` (`ok` or a `pdf_*` code) |
+| `documents_ingested_total` | counter | `outcome` (`ready`, `failed`) |
+| `document_embedding_duration_seconds` | histogram | from a worker claiming a document to it being ready |
+| `embedding_requests_total`, `embedding_request_duration_seconds` | counter, histogram | `purpose` (`document`, `query`), `outcome` (`ok`, `transient_error`, `permanent_error`, `timeout`) |
+| `embedding_tokens_total` | counter | `purpose` |
+| `document_retrievals_total`, `document_retrieval_duration_seconds` | counter, histogram | `outcome` (`chunks`, `empty`, `failed`) |
 | `db_pool_connections_in_use`, `db_pool_connections_max`, `db_pool_saturation_ratio` | gauge | |
+
+Worth alerting on: `documents_ingested_total{outcome="failed"}` or
+`provider_failures_total{provider="embeddings"}` rising (usually a key or
+quota problem: no document becomes usable), and the share of
+`document_retrievals_total{outcome="empty"}` climbing (questions the documents
+do not answer, or a relevance floor set too high for the model in use).
 
 Labels only take values from small fixed sets. Ids and user input never
 become labels, because each distinct value creates a new time series.

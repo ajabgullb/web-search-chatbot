@@ -22,6 +22,9 @@ from app.db.session import Database
 _HTTP_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10)
 _RUN_BUCKETS = (0.5, 1, 2, 5, 10, 20, 30, 45, 60, 90, 120)
 _SEARCH_BUCKETS = (0.1, 0.25, 0.5, 1, 2, 5, 10, 20)
+# Parsing is bounded by DOCUMENT_PARSE_TIMEOUT_SECONDS (30 s); embedding a
+# whole document by its size and the provider's speed.
+_DOCUMENT_BUCKETS = (0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60, 120)
 
 HTTP_REQUESTS = Counter(
     "http_requests_total",
@@ -58,6 +61,49 @@ PROVIDER_FAILURES = Counter(
     "provider_failures_total", "Failed provider calls.", ["provider", "kind"]
 )
 RATE_LIMIT_HITS = Counter("rate_limit_hits_total", "Requests refused by a rate limit.", ["bucket"])
+
+# Documents (ADR-0015). ``outcome`` on uploads is "accepted", "duplicate", or
+# the stable error code the upload was refused with.
+DOCUMENT_UPLOADS = Counter("document_uploads_total", "PDF uploads by outcome.", ["outcome"])
+PDF_PARSE_DURATION = Histogram(
+    "pdf_parse_duration_seconds",
+    "Time to read a PDF in its child process, by outcome (ok or an error code).",
+    ["outcome"],
+    buckets=_DOCUMENT_BUCKETS,
+)
+DOCUMENTS_INGESTED = Counter(
+    "documents_ingested_total", "Documents that finished ingestion.", ["outcome"]
+)
+DOCUMENT_EMBEDDING_DURATION = Histogram(
+    "document_embedding_duration_seconds",
+    "From a worker claiming a document to it being ready.",
+    buckets=_DOCUMENT_BUCKETS,
+)
+EMBEDDING_REQUESTS = Counter(
+    "embedding_requests_total",
+    "Embedding provider calls by purpose (document or query) and outcome.",
+    ["purpose", "outcome"],
+)
+EMBEDDING_DURATION = Histogram(
+    "embedding_request_duration_seconds",
+    "Embedding provider call latency.",
+    ["purpose"],
+    buckets=_SEARCH_BUCKETS,
+)
+EMBEDDING_TOKENS = Counter(
+    "embedding_tokens_total", "Embedding tokens reported by the provider.", ["purpose"]
+)
+DOCUMENT_RETRIEVALS = Counter(
+    "document_retrievals_total",
+    "Searches of a conversation's documents: chunks (something relevant), "
+    "empty (nothing above the floor), or failed.",
+    ["outcome"],
+)
+DOCUMENT_RETRIEVAL_DURATION = Histogram(
+    "document_retrieval_duration_seconds",
+    "Embedding the question plus both searches.",
+    buckets=_SEARCH_BUCKETS,
+)
 
 DB_POOL_CHECKED_OUT = Gauge("db_pool_connections_in_use", "Database connections checked out.")
 DB_POOL_CAPACITY = Gauge(
@@ -111,6 +157,37 @@ def record_llm_failure(kind: str) -> None:
 
 def record_rate_limited(bucket: str) -> None:
     RATE_LIMIT_HITS.labels(bucket).inc()
+
+
+def record_document_upload(outcome: str) -> None:
+    DOCUMENT_UPLOADS.labels(outcome).inc()
+
+
+def record_pdf_parse(outcome: str, seconds: float) -> None:
+    PDF_PARSE_DURATION.labels(outcome).observe(seconds)
+
+
+def record_document_ingested(outcome: str, seconds: float | None = None) -> None:
+    """``outcome`` is ready or failed; the duration is recorded for ready only."""
+    DOCUMENTS_INGESTED.labels(outcome).inc()
+    if seconds is not None:
+        DOCUMENT_EMBEDDING_DURATION.observe(seconds)
+
+
+def record_embedding(purpose: str, outcome: str, seconds: float, tokens: int = 0) -> None:
+    """``purpose`` is document or query; ``outcome`` ok, transient_error,
+    permanent_error, or timeout."""
+    EMBEDDING_REQUESTS.labels(purpose, outcome).inc()
+    EMBEDDING_DURATION.labels(purpose).observe(seconds)
+    if tokens:
+        EMBEDDING_TOKENS.labels(purpose).inc(tokens)
+    if outcome != "ok":
+        PROVIDER_FAILURES.labels("embeddings", outcome).inc()
+
+
+def record_document_retrieval(outcome: str, seconds: float) -> None:
+    DOCUMENT_RETRIEVALS.labels(outcome).inc()
+    DOCUMENT_RETRIEVAL_DURATION.observe(seconds)
 
 
 def _sample_pool(database: Database) -> None:

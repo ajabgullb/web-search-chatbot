@@ -13,6 +13,10 @@ about as long as they do in production, which is what consumes connections:
 
 - search: 1.0 s per query
 - model: 0.8 s to the first token, then ~600 characters over ~2.5 s
+- embeddings: 0.3 s per request (a batch of chunks, or one question)
+
+PDF parsing is real: the upload phase in ``run.py`` sends real PDFs through
+the forkserver child processes, which is what that phase measures.
 """
 
 from __future__ import annotations
@@ -28,14 +32,17 @@ import app.main as app_main
 from app.agent.routing import SearchDecision
 from app.core.config import Environment, Settings
 from app.providers.email import EmailPayload
+from app.providers.embeddings import EmbeddingBatch
 from app.providers.llm import LLMChunk, StructuredT
 from app.providers.search import SearchHit
+from tests.fakes import FakeEmbeddings
 from tests.scratch_database import prepare_scratch_database, scratch_database_url
 
 SEARCH_SECONDS = 1.0
 FIRST_TOKEN_SECONDS = 0.8
 CHUNK_SECONDS = 0.05
 CHUNK_CHARS = 12
+EMBED_SECONDS = 0.3
 
 CITED_ANSWER = (
     "According to the latest reports, the central bank held its policy rate steady [S1]. "
@@ -126,6 +133,12 @@ def hash_on_event_loop() -> None:
     auth.verify_password = verify_blocking  # type: ignore[assignment]
 
 
+class SlowEmbeddings(FakeEmbeddings):
+    async def embed(self, texts: Sequence[str]) -> EmbeddingBatch:
+        await asyncio.sleep(EMBED_SECONDS)
+        return await super().embed(texts)
+
+
 class DiscardEmail:
     async def send(self, payload: EmailPayload) -> None:
         return None
@@ -156,10 +169,14 @@ def build() -> FastAPI:
         # Verification is not what is being measured; it would only add a
         # step to every virtual user's setup.
         require_email_verification=False,
+        # The upload phase rotates through accounts; the per-user upload
+        # limit would otherwise be what it measures.
+        rate_limit_document_uploads=1_000_000,
     )
     app_main.build_llm_provider = lambda _settings: SlowLLM()  # type: ignore[assignment]
     app_main.build_search_provider = lambda _settings: SlowSearch()  # type: ignore[assignment]
     app_main.build_email_sender = lambda _settings: DiscardEmail()  # type: ignore[assignment]
+    app_main.build_embedding_provider = lambda _settings: SlowEmbeddings()  # type: ignore[assignment]
     return app_main.create_app(settings)
 
 
