@@ -14,7 +14,7 @@ browser ──▶ frontend (Vite/React, nginx in production)
                 ▼
            backend (FastAPI, async)
                 │
-                ├── PostgreSQL   application data + LangGraph checkpoints
+                ├── PostgreSQL   application data + LangGraph checkpoints (pgvector image)
                 ├── Redis        run locks, rate limits, cancel signals
                 ├── LLM provider  behind app/providers/llm.py
                 └── Search        behind app/providers/search.py
@@ -107,6 +107,15 @@ target a different database than the API.
 In development the single API container runs `alembic upgrade head` before
 starting. Production runs migrations as an explicit release job so replicas do
 not race (Phase 8).
+
+PostgreSQL runs on the `pgvector/pgvector` image, which adds the `vector`
+column type for document-chunk embeddings ([ADR-0015](adr/0015-chat-scoped-pdf-retrieval.md)).
+The `documents` and `document_chunks` tables exist from that migration on; the
+upload API and retrieval that use them arrive in later Phase 11 slices. The
+image is Debian-based where the previous one was Alpine, so the migration
+refuses a data volume carried across from the old image, whose text indexes
+would be sorted under a different C library (`app/db/migrations_helpers.py`;
+the safe move is in `docs/deployment.md` §5).
 
 ## Frontend
 

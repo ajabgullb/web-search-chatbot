@@ -31,7 +31,7 @@ them.
 
 | | |
 | --- | --- |
-| Backend | Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 (async), Alembic, PostgreSQL 16 |
+| Backend | Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 (async), Alembic, PostgreSQL 16 with pgvector |
 | Agent | LangChain + LangGraph (explicit graph, PostgreSQL checkpointer), Tavily search |
 | Frontend | React 19, TypeScript (strict), Vite, React Router, TanStack Query, Tailwind CSS v4, shadcn/ui |
 | Tooling | uv, npm, Ruff, mypy, ESLint, Prettier, pytest, Vitest, Playwright |
@@ -46,6 +46,11 @@ Requires Docker with Compose v2+. For host-side commands you also need
 cp .env.example .env      # then edit if any default port is taken
 make dev                  # builds and starts api, web, postgres, redis, mailpit
 ```
+
+> **Upgrading an existing checkout?** PostgreSQL now runs on the Debian-based
+> pgvector image instead of `postgres:16-alpine`. Do not start it on your old
+> data volume: dump first, then restore into a fresh one, as described in
+> [Moving to the pgvector image](docs/deployment.md#5-moving-to-the-pgvector-image).
 
 | Service | URL |
 | --- | --- |

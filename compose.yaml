@@ -3,7 +3,10 @@ name: web-search-chatbot
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # PostgreSQL 16 with pgvector (ADR-0015). Debian-based, unlike the old
+    # postgres:16-alpine: a data volume from that image must be dumped and
+    # restored, not reattached, because the two sort text differently.
+    image: pgvector/pgvector:0.8.7-pg16-bookworm
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}

@@ -35,6 +35,11 @@ _INSECURE_SECRETS = frozenset(
 
 PRODUCTION_CONFIG_ERROR = "Refusing to start in production:\n"
 
+# The width of the ``document_chunks.embedding`` column. pgvector stores only
+# vectors of exactly this length, so EMBEDDING_DIMENSIONS must match it, and
+# changing either one is a migration plus a re-embed, never a config edit.
+EMBEDDING_VECTOR_DIMENSIONS = 1536
+
 
 class Environment(StrEnum):
     development = "development"
@@ -173,6 +178,22 @@ class Settings(BaseSettings):
     search_api_key: str = ""
     search_base_url: str = "https://api.tavily.com"
 
+    # --- Embedding provider (ADR-0015) ---
+    # Configured separately from the chat model on purpose: LLM_BASE_URL may
+    # name a provider with no embeddings API at all, and the two must be free
+    # to change independently.
+    embedding_api_key: str = ""
+    embedding_base_url: str = "https://api.openai.com/v1"
+    # OpenAI's cheapest embedding model when chosen (2026-10-19): $0.02 per 1M
+    # tokens, against $0.10 for ada-002 and $0.13 for text-embedding-3-large.
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = EMBEDDING_VECTOR_DIMENSIONS
+    # One request. A full batch of chunks takes longer than a single query.
+    embedding_timeout_seconds: float = 30.0
+    # Chunks per request. OpenAI caps a request at 300,000 tokens across all
+    # inputs; 100 chunks of ~500 tokens stays far below that.
+    embedding_batch_size: int = Field(default=100, ge=1, le=500)
+
     # --- Agent budgets ---
     max_searches_per_run: int = 3
     max_results_per_search: int = 5
@@ -232,6 +253,17 @@ class Settings(BaseSettings):
         # hash output. Shorter keys weaken every token the API issues.
         if len(value) < 32:
             raise ValueError("JWT_SECRET must be at least 32 characters")
+        return value
+
+    @field_validator("embedding_dimensions")
+    @classmethod
+    def _match_vector_column(cls, value: int) -> int:
+        # A mismatch would only surface as an insert error on the first upload.
+        if value != EMBEDDING_VECTOR_DIMENSIONS:
+            raise ValueError(
+                f"EMBEDDING_DIMENSIONS must be {EMBEDDING_VECTOR_DIMENSIONS}, the width of the "
+                "stored vectors; changing it needs a migration and a re-embed"
+            )
         return value
 
     @model_validator(mode="after")

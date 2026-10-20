@@ -7,6 +7,7 @@ whole schema from, so a new table cannot be forgotten in a migration.
 from app.models.auth_session import AuthSession
 from app.models.citation import Citation
 from app.models.conversation import Conversation
+from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.message import Message, MessageRole, MessageStatus
 from app.models.password_reset_token import PasswordResetToken
 from app.models.run import Run, RunStatus
@@ -16,6 +17,9 @@ __all__ = [
     "AuthSession",
     "Citation",
     "Conversation",
+    "Document",
+    "DocumentChunk",
+    "DocumentStatus",
     "Message",
     "MessageRole",
     "MessageStatus",
