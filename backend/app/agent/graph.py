@@ -1,11 +1,18 @@
 """The compiled agent graph and the runner that enforces the run deadline.
 
-    START -> decide_search -> web_search -> synthesize -> finalize -> END
-                           \\              \\           /
-                            -> answer_direct ----------
+    START -> decide_retrieval -> [retrieve_documents] -> [web_search]
+                                                            |
+                              finalize <- synthesize <------+
+                                 ^                          |
+                                 +------ answer_direct <----+
+    finalize -> END
+
+Both retrieval steps are optional: the user's documents are read when the
+conversation has some (ADR-0015), the web is searched when the decision says
+so, and an answer is synthesized only if either produced a source.
 
 There is no back edge. Every path from START reaches ``finalize`` in at most
-four steps, so a run cannot loop; the number of searches is bounded inside
+five steps, so a run cannot loop; the number of searches is bounded inside
 ``web_search`` by its own counter rather than by repeating a node.
 """
 
@@ -28,21 +35,39 @@ from app.agent.context import AgentContext
 from app.agent.events import (
     AgentEvent,
     CitationAdded,
+    DocumentsRetrieved,
     SearchCompleted,
     SearchStarted,
     StatusChanged,
     TextDelta,
 )
-from app.agent.nodes import answer_direct, decide_search, finalize, synthesize, web_search
+from app.agent.nodes import (
+    answer_direct,
+    decide_retrieval,
+    finalize,
+    retrieve_documents,
+    synthesize,
+    web_search,
+)
 from app.agent.prompts import PROMPT_VERSION
-from app.agent.routing import route_after_decision, route_after_search
+from app.agent.routing import route_after_decision, route_after_documents, route_after_search
 from app.agent.state import AgentState, Citation, RunError, Source, initial_state
 
 logger = logging.getLogger(__name__)
 
 
 def _route_decide(state: AgentState) -> str:
-    return route_after_decision(state.get("search_decision", False))
+    return route_after_decision(
+        use_documents=state.get("use_documents", False),
+        should_search=state.get("search_decision", False),
+    )
+
+
+def _route_documents(state: AgentState) -> str:
+    return route_after_documents(
+        should_search=state.get("search_decision", False),
+        source_count=len(state.get("sources", [])),
+    )
 
 
 def _route_search(state: AgentState) -> str:
@@ -56,17 +81,31 @@ def build_graph(
     builder: StateGraph[AgentState, AgentContext, AgentState, AgentState] = StateGraph(
         AgentState, context_schema=AgentContext
     )
-    builder.add_node("decide_search", decide_search)
+    builder.add_node("decide_retrieval", decide_retrieval)
+    builder.add_node("retrieve_documents", retrieve_documents)
     builder.add_node("web_search", web_search)
     builder.add_node("synthesize", synthesize)
     builder.add_node("answer_direct", answer_direct)
     builder.add_node("finalize", finalize)
 
-    builder.add_edge(START, "decide_search")
+    builder.add_edge(START, "decide_retrieval")
     builder.add_conditional_edges(
-        "decide_search",
+        "decide_retrieval",
         _route_decide,
-        {"web_search": "web_search", "answer_direct": "answer_direct"},
+        {
+            "retrieve_documents": "retrieve_documents",
+            "web_search": "web_search",
+            "answer_direct": "answer_direct",
+        },
+    )
+    builder.add_conditional_edges(
+        "retrieve_documents",
+        _route_documents,
+        {
+            "web_search": "web_search",
+            "synthesize": "synthesize",
+            "answer_direct": "answer_direct",
+        },
     )
     builder.add_conditional_edges(
         "web_search",
@@ -91,6 +130,8 @@ class AgentResult:
     citations: list[Citation] = field(default_factory=list)
     sources: list[Source] = field(default_factory=list)
     searched: bool = False
+    # The conversation's documents were read for this answer.
+    read_documents: bool = False
     search_count: int = 0
     search_rationale: str = ""
     degraded: bool = False
@@ -119,6 +160,7 @@ def _result_from_state(state: AgentState) -> AgentResult:
         citations=state.get("citations", []),
         sources=state.get("sources", []),
         searched=state.get("search_decision", False),
+        read_documents=state.get("use_documents", False),
         search_count=state.get("search_iterations", 0),
         search_rationale=state.get("search_rationale", ""),
         degraded=state.get("degraded", False),
@@ -133,7 +175,14 @@ def _result_from_state(state: AgentState) -> AgentResult:
 
 AgentGraph = CompiledStateGraph[AgentState, AgentContext, AgentState, AgentState]
 
-_EVENT_TYPES = (StatusChanged, SearchStarted, SearchCompleted, TextDelta, CitationAdded)
+_EVENT_TYPES = (
+    StatusChanged,
+    DocumentsRetrieved,
+    SearchStarted,
+    SearchCompleted,
+    TextDelta,
+    CitationAdded,
+)
 
 
 def _run_input(context: AgentContext, history: Sequence[AnyMessage]) -> AgentState:

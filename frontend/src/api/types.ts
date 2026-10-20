@@ -42,6 +42,7 @@ export type DocumentStatus = ChatDocument['status']
 export type RunEvent =
   | Schemas['RunStartedEvent']
   | Schemas['AgentStatusEvent']
+  | Schemas['DocumentsRetrievedEvent']
   | Schemas['SearchStartedEvent']
   | Schemas['SearchCompletedEvent']
   | Schemas['MessageDeltaEvent']
@@ -51,3 +52,4 @@ export type RunEvent =
   | Schemas['RunCancelledEvent']
 
 export type AgentStatus = Schemas['AgentStatusEvent']['status']
+export type RetrievedDocument = Schemas['RetrievedDocumentRead']

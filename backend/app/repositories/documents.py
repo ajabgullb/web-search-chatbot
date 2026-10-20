@@ -31,6 +31,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.tools.documents import ChunkCandidate
 from app.core.config import EMBEDDING_VECTOR_DIMENSIONS
 from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.embedding_usage import EmbeddingPurpose, EmbeddingUsage
@@ -128,6 +129,120 @@ class DocumentRepository:
             )
         )
         return cast("CursorResult[Any]", result).rowcount
+
+    # --- retrieval ---------------------------------------------------------
+    #
+    # Both searches constrain user *and* conversation in SQL, and read only
+    # chunks of ready documents embedded with the model the question was
+    # embedded with: vectors from two models live in unrelated spaces.
+
+    def _searchable(
+        self, *, user_id: uuid.UUID, conversation_id: uuid.UUID, embedding_model: str
+    ) -> list[Any]:
+        return [
+            DocumentChunk.user_id == user_id,
+            DocumentChunk.conversation_id == conversation_id,
+            DocumentChunk.embedding.is_not(None),
+            Document.user_id == user_id,
+            Document.status == DocumentStatus.ready,
+            Document.embedding_model == embedding_model,
+        ]
+
+    def _candidate_columns(self, vector: list[float]) -> list[Any]:
+        return [
+            DocumentChunk.id,
+            DocumentChunk.document_id,
+            Document.filename,
+            DocumentChunk.page,
+            DocumentChunk.content,
+            (1 - DocumentChunk.embedding.cosine_distance(vector)).label("similarity"),
+        ]
+
+    @staticmethod
+    def _candidates(rows: Any) -> list[ChunkCandidate]:
+        return [
+            ChunkCandidate(
+                chunk_id=row[0],
+                document_id=row[1],
+                filename=row[2],
+                page=row[3],
+                content=row[4],
+                similarity=float(row[5]),
+            )
+            for row in rows
+        ]
+
+    async def ready_filenames(
+        self, *, user_id: uuid.UUID, conversation_id: uuid.UUID, embedding_model: str
+    ) -> list[str]:
+        result = await self._session.execute(
+            select(Document.filename)
+            .where(
+                Document.user_id == user_id,
+                Document.conversation_id == conversation_id,
+                Document.status == DocumentStatus.ready,
+                Document.embedding_model == embedding_model,
+            )
+            .order_by(Document.created_at, Document.id)
+        )
+        return list(result.scalars())
+
+    async def nearest_chunks(
+        self,
+        *,
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        embedding_model: str,
+        vector: list[float],
+        limit: int,
+    ) -> list[ChunkCandidate]:
+        """Exact cosine search over one conversation's chunks (no ANN index)."""
+        result = await self._session.execute(
+            select(*self._candidate_columns(vector))
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .where(
+                *self._searchable(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    embedding_model=embedding_model,
+                )
+            )
+            .order_by(DocumentChunk.embedding.cosine_distance(vector), DocumentChunk.id)
+            .limit(limit)
+        )
+        return self._candidates(result)
+
+    async def keyword_chunks(
+        self,
+        *,
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        embedding_model: str,
+        vector: list[float],
+        tsquery: str,
+        limit: int,
+    ) -> list[ChunkCandidate]:
+        """Chunks matching any keyword, best text-search rank first.
+
+        ``tsquery`` is built by ``keyword_query`` from letters and digits only,
+        so it cannot carry operators; it is still a bound parameter.
+        """
+        query = func.to_tsquery("simple", tsquery)
+        result = await self._session.execute(
+            select(*self._candidate_columns(vector))
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .where(
+                *self._searchable(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    embedding_model=embedding_model,
+                ),
+                DocumentChunk.content_tsv.op("@@")(query),
+            )
+            .order_by(func.ts_rank_cd(DocumentChunk.content_tsv, query).desc(), DocumentChunk.id)
+            .limit(limit)
+        )
+        return self._candidates(result)
 
     # --- quota -------------------------------------------------------------
 

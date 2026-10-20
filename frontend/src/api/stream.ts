@@ -129,6 +129,7 @@ export class SSEParser {
 export const RUN_EVENT_TYPES: ReadonlySet<string> = new Set<RunEvent['type']>([
   'run.started',
   'agent.status',
+  'documents.retrieved',
   'search.started',
   'search.completed',
   'message.delta',

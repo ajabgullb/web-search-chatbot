@@ -9,7 +9,15 @@ from __future__ import annotations
 
 import pytest
 
-from app.agent.routing import heuristic_search_decision, route_after_decision, route_after_search
+from app.agent.routing import (
+    heuristic_search_decision,
+    is_conversational,
+    refers_to_documents,
+    route_after_decision,
+    route_after_documents,
+    route_after_search,
+    wants_web,
+)
 
 
 class TestDoesNotSearch:
@@ -84,10 +92,55 @@ class TestDefersToTheModel:
         assert decision.should_search is True
 
 
+class TestDocumentHeuristics:
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "Summarize the attached report",
+            "What does the PDF say about pricing?",
+            "In the document, who signed the contract?",
+            "list the risks from the uploaded file",
+        ],
+    )
+    def test_questions_about_the_documents_are_recognised(self, question: str) -> None:
+        assert refers_to_documents(question)
+
+    @pytest.mark.parametrize(
+        "question", ["What is the capital of France?", "how do I sort a list in python"]
+    )
+    def test_ordinary_questions_are_not(self, question: str) -> None:
+        assert not refers_to_documents(question)
+
+    def test_an_explicit_ask_for_the_web_is_recognised(self) -> None:
+        assert wants_web("compare the report with what you can find online")
+        assert wants_web("search the web for newer figures than the PDF")
+        assert not wants_web("what does the report conclude?")
+
+    def test_small_talk_and_supplied_text_need_no_retrieval(self) -> None:
+        assert is_conversational("thanks!") == "greeting or small talk"
+        assert is_conversational("rewrite this: hello there") == "operates on text already supplied"
+        assert is_conversational("What were Q3 revenues?") is None
+
+
 class TestRouting:
     def test_the_decision_picks_the_branch(self) -> None:
-        assert route_after_decision(True) == "web_search"
-        assert route_after_decision(False) == "answer_direct"
+        assert route_after_decision(use_documents=False, should_search=True) == "web_search"
+        assert route_after_decision(use_documents=False, should_search=False) == "answer_direct"
+
+    def test_documents_are_read_first(self) -> None:
+        """Before the web, whichever way the web decision went."""
+        for should_search in (True, False):
+            assert (
+                route_after_decision(use_documents=True, should_search=should_search)
+                == "retrieve_documents"
+            )
+
+    def test_after_the_documents(self) -> None:
+        assert route_after_documents(should_search=True, source_count=0) == "web_search"
+        assert route_after_documents(should_search=True, source_count=3) == "web_search"
+        assert route_after_documents(should_search=False, source_count=2) == "synthesize"
+        # Nothing relevant and no web coming: never synthesize from nothing.
+        assert route_after_documents(should_search=False, source_count=0) == "answer_direct"
 
     def test_an_empty_result_set_avoids_synthesis(self) -> None:
         """Synthesizing from nothing is how fabricated citations happen."""

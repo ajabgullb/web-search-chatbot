@@ -411,11 +411,13 @@ Deferred from the original 11a list: the `citations` changes move to 11c, the fi
 
 **Done when:** graph tests cover every routing combination; no path loops; an ownership test proves user B never retrieves user A's chunk with an identical question; the `ci` eval subset passes its gates.
 
+**Delivered:** all of the above, plus the frontend half of 11d's citation work (document source cards, `[D1]` markers, the live "Read report.pdf · 2 passages" line, the temporary note removed). Retrieval quality is measured live by `evals/retrieval.py` rather than as recall@k inside the scripted eval. Findings that changed the design, all recorded in ADR-0015: keyword matches now bypass the relevance floor only for terms with a digit (plain words leaked irrelevant chunks); the floor of 0.25 is calibrated against the real model; and the answering prompt is told when document retrieval failed or found nothing, after the real model claimed it "cannot access uploaded files". The seven document eval cases pass against gpt-4o-mini as well as in CI.
+
 ### 11d — Frontend
 
 - PDF upload control in the composer (`accept="application/pdf"`, client-side size check mirrored from the server limit), document chips with status, polling while `processing`, remove action, accessible error states. **Delivered early, ahead of 11c, so uploads can be tried by hand:** a paperclip button inside the message box, chips above the text, a backend test pinning `MAX_DOCUMENT_BYTES` in `constants.ts` to the setting. The chips carry a temporary note that answers do not use documents yet; remove it in 11c.
-- Document source cards (filename and page, no external link); `rehypeCitations.ts` accepts `D` labels.
-- OpenAPI and the generated client regenerated and committed.
+- Document source cards (filename and page, no external link); `rehypeCitations.ts` accepts `D` labels. **Delivered in 11c.**
+- OpenAPI and the generated client regenerated and committed. **Delivered in 11c.**
 
 **Done when:** Vitest covers upload states, polling stop conditions, and document citations; Playwright uploads a fixture PDF with fake providers, asks about it, sees a `[D1]` citation, reloads, and deletes the document.
 

@@ -222,6 +222,18 @@ class Settings(BaseSettings):
     document_embed_lease_seconds: float = Field(default=120.0, gt=0)
     document_embed_max_attempts: int = Field(default=3, ge=1)
     document_ingestion_sweep_seconds: float = Field(default=30.0, gt=0)
+    # Retrieval inside a run (app/agent/tools/documents.py). A chunk is used
+    # only if its cosine similarity to the question reaches the floor, or it
+    # matches the question's keywords. The floor was calibrated against
+    # text-embedding-3-small; see ADR-0015.
+    document_min_similarity: float = Field(default=0.25, ge=-1.0, le=1.0)
+    document_top_k: int = Field(default=6, ge=1, le=20)
+    document_context_chars: int = Field(default=12_000, ge=500)
+    # Candidates each search method returns before the two lists are fused.
+    document_candidates: int = Field(default=20, ge=1, le=100)
+    # Embedding the question, inside the run deadline. Short: a slow answer
+    # is worse than one that skips the documents and says so.
+    document_query_timeout_seconds: float = Field(default=10.0, gt=0)
 
     # --- Agent budgets ---
     max_searches_per_run: int = 3

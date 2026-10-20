@@ -42,6 +42,7 @@ from app.providers.llm import build_llm_provider
 from app.providers.search import build_search_provider
 from app.services.ingestion import IngestionManager
 from app.services.pdf import PdfParser
+from app.services.retrieval import PostgresDocumentRetriever
 from app.services.run_executor import RunManager
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.pdf_parser = PdfParser.from_settings(settings)
     app.state.ingestion = IngestionManager(
         app.state.database, settings, embeddings=lambda: app.state.embedding_provider
+    )
+    app.state.document_retriever = PostgresDocumentRetriever(
+        app.state.database, embeddings=lambda: app.state.embedding_provider
     )
 
     logger.info(

@@ -5,9 +5,13 @@
  * focus (`tabIndex={-1}`: reachable by script, not added to the tab order).
  * Links open in a new tab with `noopener noreferrer`, and only after the URL
  * is re-checked here — the server validated it, and this is the second lock.
+ *
+ * A document citation (`kind: "document"`) is a passage of the user's own
+ * PDF: it shows the filename and page, and has no link, because there is no
+ * URL and the original file is not kept (ADR-0015).
  */
 
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, FileText } from 'lucide-react'
 
 import type { Citation } from '@/api/types'
 import { sourceAnchorId } from '@/features/chat/sourceAnchors'
@@ -37,8 +41,13 @@ export function SourceList({
       </h3>
       <ol className="flex flex-col gap-2">
         {citations.map((citation) => {
+          const isDocument = citation.kind === 'document'
           const date = published(citation.published_at)
-          const meta = [citation.display_url, citation.publisher, date].filter(Boolean).join(' · ')
+          const meta = isDocument
+            ? [citation.page ? `Page ${citation.page}` : null, 'your document']
+                .filter(Boolean)
+                .join(' · ')
+            : [citation.display_url, citation.publisher, date].filter(Boolean).join(' · ')
           return (
             <li
               key={citation.source_id}
@@ -53,7 +62,13 @@ export function SourceList({
                 {citation.ordinal}
               </span>
               <div className="min-w-0">
-                {isSafeExternalUrl(citation.url) ? (
+                {isDocument ? (
+                  <span className="inline-flex items-center gap-1 font-medium">
+                    <span className="sr-only">Source {citation.ordinal}: </span>
+                    <FileText className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+                    {citation.title}
+                  </span>
+                ) : citation.url && isSafeExternalUrl(citation.url) ? (
                   <a
                     href={citation.url}
                     target="_blank"

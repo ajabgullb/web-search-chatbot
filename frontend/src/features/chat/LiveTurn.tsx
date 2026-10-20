@@ -8,13 +8,13 @@
  * marked, with a way to try again.
  */
 
-import { AlertCircle, Globe, Loader2, RotateCcw } from 'lucide-react'
+import { AlertCircle, FileText, Globe, Loader2, RotateCcw } from 'lucide-react'
 import { useDeferredValue } from 'react'
 
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { AnswerText, AssistantBubble, UserBubble } from '@/features/chat/MessageList'
-import type { LiveRun, LiveSearch } from '@/features/chat/runStore'
+import type { LiveDocuments, LiveRun, LiveSearch } from '@/features/chat/runStore'
 import { isActive } from '@/features/chat/runStore'
 import { SourceList } from '@/features/chat/SourceList'
 
@@ -23,6 +23,8 @@ function activityLabel(run: LiveRun): string {
   if (run.phase === 'sending') return 'Sending…'
   if (run.phase === 'recovering') return 'Reconnecting to the answer…'
   switch (run.status) {
+    case 'reading_documents':
+      return 'Reading your documents…'
     case 'searching':
       return 'Searching the web…'
     case 'writing':
@@ -30,6 +32,35 @@ function activityLabel(run: LiveRun): string {
     default:
       return 'Thinking…'
   }
+}
+
+function DocumentProgress({ documents }: { documents: LiveDocuments | null }) {
+  if (documents === null) return null
+  return (
+    <ul className="mb-2 flex flex-col gap-1 text-xs text-muted-foreground">
+      {documents.failed ? (
+        <li className="flex items-center gap-1.5">
+          <FileText className="size-3 shrink-0" aria-hidden />
+          Your documents could not be read for this answer
+        </li>
+      ) : documents.documents.length === 0 ? (
+        <li className="flex items-center gap-1.5">
+          <FileText className="size-3 shrink-0" aria-hidden />
+          Nothing in your documents matched this question
+        </li>
+      ) : (
+        documents.documents.map((document) => (
+          <li key={document.document_id} className="flex items-center gap-1.5">
+            <FileText className="size-3 shrink-0" aria-hidden />
+            <span className="truncate">Read {document.filename}</span>
+            <span className="shrink-0">
+              · {document.chunk_count} {document.chunk_count === 1 ? 'passage' : 'passages'}
+            </span>
+          </li>
+        ))
+      )}
+    </ul>
+  )
 }
 
 function SearchProgress({ searches }: { searches: LiveSearch[] }) {
@@ -108,6 +139,7 @@ export function LiveTurn({ run, onRetry }: LiveTurnProps) {
             </p>
           ) : null}
 
+          <DocumentProgress documents={run.documents} />
           <SearchProgress searches={run.searches} />
 
           {text ? (

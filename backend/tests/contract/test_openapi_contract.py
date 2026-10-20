@@ -72,6 +72,7 @@ def test_the_stream_publishes_every_event_type(schema: dict[str, Any]) -> None:
     assert published == {
         "run.started",
         "agent.status",
+        "documents.retrieved",
         "search.started",
         "search.completed",
         "message.delta",

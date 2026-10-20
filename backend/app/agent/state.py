@@ -17,27 +17,39 @@ they are never written to a checkpoint row.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 
+SourceKind = Literal["web", "document"]
+
 
 class Source(TypedDict):
-    """A normalized search result, ready to be cited.
+    """Something the answer may cite: a search result or a document chunk.
 
-    ``source_id`` is the label the model is told to cite (``S1``, ``S2``, …).
-    It is assigned by us, never by the provider and never by the model.
+    ``source_id`` is the label the model is told to cite: ``S1``, ``S2`` for
+    web results, ``D1``, ``D2`` for chunks of the user's documents. It is
+    assigned by us, never by the provider and never by the model.
+
+    Web sources have a URL. Document sources have none; they carry the
+    document, the chunk, and the page instead, and ``title`` is the filename.
+    The document fields are ``NotRequired`` so state checkpointed before
+    documents existed still reads back.
     """
 
     source_id: str
-    url: str
-    display_url: str
+    url: str | None
+    display_url: str | None
     title: str
     snippet: str
     publisher: str | None
     published_at: datetime | None
     retrieved_at: datetime
+    kind: NotRequired[SourceKind]
+    document_id: NotRequired[str | None]
+    chunk_id: NotRequired[str | None]
+    page: NotRequired[int | None]
 
 
 class Citation(TypedDict):
@@ -45,13 +57,17 @@ class Citation(TypedDict):
 
     ordinal: int
     source_id: str
-    url: str
-    display_url: str
+    url: str | None
+    display_url: str | None
     title: str
     publisher: str | None
     snippet: str
     published_at: datetime | None
     retrieved_at: datetime
+    kind: NotRequired[SourceKind]
+    document_id: NotRequired[str | None]
+    chunk_id: NotRequired[str | None]
+    page: NotRequired[int | None]
 
 
 ErrorCode = Literal[
@@ -88,6 +104,16 @@ class AgentState(TypedDict, total=False):
     search_decision: bool
     search_rationale: str
 
+    # Whether to read the conversation's documents, and with what text. The
+    # query may be a standalone rewrite of a follow-up question.
+    use_documents: bool
+    document_query: str
+    # Retrieval ran and found nothing above the relevance floor: the direct
+    # answer is told so, and can say the documents do not cover it.
+    documents_empty: bool
+    # Retrieval was attempted and failed (the question could not be embedded).
+    documents_failed: bool
+
     queries: list[str]
     sources: list[Source]
     citations: list[Citation]
@@ -121,6 +147,10 @@ def initial_state(
         run_id=run_id,
         search_decision=False,
         search_rationale="",
+        use_documents=False,
+        document_query="",
+        documents_empty=False,
+        documents_failed=False,
         queries=[],
         sources=[],
         citations=[],

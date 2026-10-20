@@ -217,6 +217,10 @@ def normalize_hits(
                 publisher=hit.publisher,
                 published_at=hit.published_at,
                 retrieved_at=retrieved_at,
+                kind="web",
+                document_id=None,
+                chunk_id=None,
+                page=None,
             )
         )
     return sources

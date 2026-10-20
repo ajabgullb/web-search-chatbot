@@ -32,6 +32,7 @@ import type {
   AgentStatus,
   ChatMessage,
   Citation,
+  RetrievedDocument,
   Run,
   RunCreate,
   RunEvent,
@@ -52,6 +53,13 @@ export interface LiveSearch {
   failed: boolean
 }
 
+/** What the answer read of the conversation's documents. */
+export interface LiveDocuments {
+  documents: RetrievedDocument[]
+  /** The documents could not be searched for this answer. */
+  failed: boolean
+}
+
 export interface LiveError {
   code: string
   message: string
@@ -67,6 +75,8 @@ export interface LiveRun {
   userMessageId: string | null
   runId: string | null
   status: AgentStatus | null
+  /** Null until the answer has looked at the documents, or if it never does. */
+  documents: LiveDocuments | null
   searches: LiveSearch[]
   text: string
   citations: Citation[]
@@ -96,6 +106,7 @@ export const runStoreTiming = {
 
 const STATUS_ANNOUNCEMENTS: Record<AgentStatus, string> = {
   thinking: 'The assistant is thinking.',
+  reading_documents: 'Reading your documents.',
   searching: 'Searching the web.',
   writing: 'Writing the answer.',
 }
@@ -108,6 +119,7 @@ function blankRun(conversationId: string, overrides: Partial<LiveRun>): LiveRun 
     userMessageId: null,
     runId: null,
     status: null,
+    documents: null,
     searches: [],
     text: '',
     citations: [],
@@ -421,6 +433,12 @@ export class RunStore {
         this.update(conversationId, {
           status: event.status,
           announcement: STATUS_ANNOUNCEMENTS[event.status],
+        })
+        return
+
+      case 'documents.retrieved':
+        this.update(conversationId, {
+          documents: { documents: event.documents, failed: event.failed ?? false },
         })
         return
 

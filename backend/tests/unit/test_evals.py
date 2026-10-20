@@ -21,6 +21,14 @@ REQUIRED_CATEGORIES = {
     "empty_results",
     "malformed_citation",
     "conversation_follow_up",
+    # With documents (ADR-0015). Cross-user isolation is a property of the SQL,
+    # so it is tested against a real database in tests/integration/test_retrieval.py.
+    "document_answer",
+    "document_absent",
+    "document_web_conflict",
+    "document_prompt_injection",
+    "document_follow_up",
+    "document_outage",
 }
 
 

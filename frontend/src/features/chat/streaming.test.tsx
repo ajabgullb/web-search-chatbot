@@ -306,6 +306,75 @@ describe('streaming an answer', () => {
     expect(document.activeElement).toHaveTextContent('Central bank statement')
   }, 20_000)
 
+  it('shows what it read in the documents and cites a page, without a link', async () => {
+    const { state, routes } = backend()
+    stubApi(routes)
+    await openConversation()
+    const user = await send('what does the report say about revenue?')
+    await waitFor(() => expect(state.streams).toHaveLength(1))
+    const stream = latestStream(state)
+    const ev = eventsFor(RUN_ID)
+
+    const page = {
+      ordinal: 1,
+      source_id: 'D1',
+      kind: 'document',
+      url: null,
+      display_url: null,
+      document_id: '44444444-4444-4444-8444-444444444444',
+      page: 3,
+      title: 'report.pdf',
+      publisher: null,
+      snippet: 'Revenue grew 12% in the third quarter.',
+      published_at: null,
+      retrieved_at: '2026-10-20T10:00:00Z',
+    }
+    act(() => {
+      acceptQuestion(
+        state,
+        stream,
+        ev,
+        message('u1', 'user', 'what does the report say about revenue?', 1),
+      )
+      stream.send(ev('agent.status', { status: 'reading_documents' }))
+      stream.send(
+        ev('documents.retrieved', {
+          failed: false,
+          documents: [{ document_id: page.document_id, filename: 'report.pdf', chunk_count: 2 }],
+        }),
+      )
+      stream.send(ev('citation', { citation: page }))
+      stream.send(ev('message.delta', { text: 'Revenue grew 12% [D1].' }))
+    })
+
+    expect(await screen.findByText('Reading your documents.')).toBeInTheDocument()
+    expect(await screen.findByText(/read report\.pdf/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 passages/)).toBeInTheDocument()
+
+    act(() => {
+      finish(
+        state,
+        stream,
+        ev,
+        message('a1', 'assistant', 'Revenue grew 12% [D1].', 2, { citations: [page] }),
+      )
+    })
+
+    const answer = await screen.findByRole('article', { name: 'Assistant message' })
+    const marker = await within(answer).findByRole(
+      'button',
+      { name: /source 1: report\.pdf/i },
+      LAZY,
+    )
+    const sources = within(answer).getByRole('region', { name: 'Sources' })
+    expect(within(sources).getByText('Page 3 · your document')).toBeInTheDocument()
+    // A passage of the user's own file: nothing to link to.
+    expect(within(sources).queryByRole('link')).not.toBeInTheDocument()
+
+    await user.click(marker)
+    expect(document.activeElement).toHaveTextContent('report.pdf')
+  }, 20_000)
+
   it('flags a degraded answer with its notice', async () => {
     const { state, routes } = backend()
     stubApi(routes)

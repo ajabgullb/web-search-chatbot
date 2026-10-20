@@ -122,8 +122,9 @@ not race (Phase 8).
 
 PostgreSQL runs on the `pgvector/pgvector` image, which adds the `vector`
 column type for document-chunk embeddings ([ADR-0015](adr/0015-chat-scoped-pdf-retrieval.md)).
-The `documents` and `document_chunks` tables back the upload API; retrieval
-that uses them in answers arrives in a later Phase 11 slice. An append-only
+The `documents` and `document_chunks` tables back the upload API and
+document retrieval in answers (`app/services/retrieval.py`, selection rules in
+`app/agent/tools/documents.py`); citations can point at a chunk and page. An append-only
 `embedding_usage` table records tokens spent per user for the daily quota. The
 image is Debian-based where the previous one was Alpine, so the migration
 refuses a data volume carried across from the old image, whose text indexes

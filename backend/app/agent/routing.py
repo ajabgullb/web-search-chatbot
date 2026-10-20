@@ -27,6 +27,14 @@ class SearchDecision(BaseModel):
         max_length=MAX_MODEL_QUERIES,
         description="Keyword queries to run; empty when not searching.",
     )
+    document_query: str = Field(
+        default="",
+        max_length=400,
+        description=(
+            "When documents are attached: the question rewritten to stand on its own, "
+            "for searching them. Empty otherwise."
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,17 +132,62 @@ _WANTS_SOURCES = re.compile(
 )
 
 
+# The question is about the attached files. Only consulted when the
+# conversation has documents, so "the report" in a chat without one means
+# nothing here.
+_REFERS_TO_DOCUMENTS = _pattern(
+    "document",
+    "documents",
+    "doc",
+    "docs",
+    "pdf",
+    "pdfs",
+    "file",
+    "files",
+    "attachment",
+    "attachments",
+    "attached",
+    "uploaded",
+    "upload",
+    "report",
+    "paper",
+    "manual",
+    "contract",
+    "slides",
+)
+# An explicit ask for the web, which wins over "it is about the document".
+_WANTS_WEB = re.compile(
+    r"\b(?:search\s+(?:the\s+)?(?:web|internet|online)|on\s+the\s+(?:web|internet)|online|google)\b",
+    re.IGNORECASE,
+)
+
+
+def is_conversational(question: str) -> str | None:
+    """Why a message needs no retrieval at all, or None if it might."""
+    text = question.strip()
+    if not text:
+        return "empty message"
+    if _GREETING.match(text):
+        return "greeting or small talk"
+    if _TEXT_TASK_VERB.search(text) and _TEXT_TASK_OBJECT.search(text):
+        return "operates on text already supplied"
+    return None
+
+
+def refers_to_documents(question: str) -> bool:
+    return bool(_REFERS_TO_DOCUMENTS.search(question))
+
+
+def wants_web(question: str) -> bool:
+    return bool(_WANTS_WEB.search(question))
+
+
 def heuristic_search_decision(question: str) -> HeuristicDecision:
     """Classify a question without a model call where the answer is obvious."""
     text = question.strip()
-    if not text:
-        return HeuristicDecision(False, "empty message")
-
-    if _GREETING.match(text):
-        return HeuristicDecision(False, "greeting or small talk")
-
-    if _TEXT_TASK_VERB.search(text) and _TEXT_TASK_OBJECT.search(text):
-        return HeuristicDecision(False, "operates on text already supplied")
+    conversational = is_conversational(text)
+    if conversational is not None:
+        return HeuristicDecision(False, conversational)
 
     if _WANTS_SOURCES.search(text):
         return HeuristicDecision(True, "user asked for sources")
@@ -146,8 +199,17 @@ def heuristic_search_decision(question: str) -> HeuristicDecision:
     return HeuristicDecision(None, "")
 
 
-def route_after_decision(should_search: bool) -> str:
+def route_after_decision(*, use_documents: bool, should_search: bool) -> str:
+    if use_documents:
+        return "retrieve_documents"
     return "web_search" if should_search else "answer_direct"
+
+
+def route_after_documents(*, should_search: bool, source_count: int) -> str:
+    """Web search next if planned; otherwise answer from what was found."""
+    if should_search:
+        return "web_search"
+    return "synthesize" if source_count > 0 else "answer_direct"
 
 
 def route_after_search(source_count: int) -> str:

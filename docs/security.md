@@ -417,8 +417,17 @@ complex parser.
   through the checkpointer's own `adelete_thread`, because retrieved text will
   pass through graph state. Deleted text remains in database backups until
   they rotate out (`BACKUP_KEEP_DAYS`).
-- **A third party sees the text.** Document text is sent to OpenAI's
-  embeddings endpoint, and queries will be too.
+- **A third party sees the text.** Document text and each question searched
+  against it are sent to OpenAI's embeddings endpoint.
+- **Retrieval is scoped in SQL.** Both the vector and the keyword search
+  constrain `user_id` and `conversation_id` in the `WHERE` clause and read
+  only ready documents. Tests prove another user's identical document is never
+  returned and that naming someone else's conversation finds nothing; removing
+  the `user_id` condition makes the second test fail.
+- **Retrieved text is untrusted.** Document passages reach the model fenced
+  like web results, and the prompt says a document may have been written by
+  someone else. The keyword query is built from letters and digits only, so
+  a question cannot inject text-search operators.
 - **Keys stay with their provider.** With no `EMBEDDING_API_KEY`, the chat
   key is reused only if the chat endpoint is on the embeddings host. A Groq or
   OpenRouter key is never sent to OpenAI.

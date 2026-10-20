@@ -160,30 +160,43 @@ A message carries its sources and its verification state:
 ```json
 {
   "id": "...", "conversation_id": "...", "role": "assistant",
-  "content": "Rates rose to 5% in March [S1].",
+  "content": "Rates rose to 5% in March [S1]; your report expected 4.5% [D1].",
   "status": "complete", "sequence_number": 2, "created_at": "...",
   "degraded": false, "notice": null,
   "citations": [
     {
-      "ordinal": 1, "source_id": "S1",
+      "ordinal": 1, "source_id": "S1", "kind": "web",
       "url": "https://news.example/rates", "display_url": "news.example/rates",
+      "document_id": null, "page": null,
       "title": "...", "publisher": null, "snippet": "...",
+      "published_at": null, "retrieved_at": "..."
+    },
+    {
+      "ordinal": 2, "source_id": "D1", "kind": "document",
+      "url": null, "display_url": null,
+      "document_id": "...", "page": 3,
+      "title": "report.pdf", "publisher": null, "snippet": "the cited passage",
       "published_at": null, "retrieved_at": "..."
     }
   ]
 }
 ```
 
-`[S1]` markers in `content` refer to `citations[].source_id`; `ordinal` numbers
-the rendered source list in first-use order. `degraded` is true when a searched
+`[S1]` (web) and `[D1]` (document) markers in `content` refer to
+`citations[].source_id`; `ordinal` numbers the rendered source list in
+first-use order. A `kind: "document"` citation is a passage of one of the
+conversation's PDFs: it has `document_id` and `page`, `title` is the filename,
+and there is no URL. Removing the document removes its citations; the marker
+stays in the text and should render as plain text. `degraded` is true when a searched
 answer could not be tied to a source or search was unavailable; `notice` is one
 sentence explaining it, ready to show.
 
 ### Documents
 
 PDFs uploaded to one conversation ([ADR-0015](adr/0015-chat-scoped-pdf-retrieval.md)).
-A document belongs to that conversation only. Answers do not use documents
-yet; retrieval arrives in a later Phase 11 slice.
+A document belongs to that conversation only. Once `ready`, every later
+answer in the conversation can read it and cite it by page; see the `D`
+citations above and the `documents.retrieved` event below.
 
 | Method and path | Purpose |
 | --- | --- |
@@ -279,7 +292,8 @@ and increases by exactly one. Lines beginning with `:` are heartbeats (every
 | `type` | Fields | Notes |
 | --- | --- | --- |
 | `run.started` | `conversation_id`, `user_message`, `replayed` | Always first. `user_message` has the server id to reconcile an optimistic bubble. |
-| `agent.status` | `status`: `thinking` \| `searching` \| `writing` | Coarse phase only; never reasoning. |
+| `agent.status` | `status`: `thinking` \| `reading_documents` \| `searching` \| `writing` | Coarse phase only; never reasoning. |
+| `documents.retrieved` | `documents[]` {`document_id`, `filename`, `chunk_count`}, `failed` | Which of the conversation's documents the answer reads, and how many passages of each. Empty with `failed: false` means nothing relevant was found. Never document text. |
 | `search.started` | `query` | The validated query. |
 | `search.completed` | `query`, `sources[]`, `failed` | Source metadata only — no snippet, no page text. |
 | `citation` | `citation` | Sent when a source is first cited, **before** the delta containing its marker. |

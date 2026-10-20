@@ -150,22 +150,53 @@ upgrade path.
 - Every chunk query constrains `user_id` **and** `conversation_id` in SQL and
   only reads chunks of `ready` documents embedded with the configured model.
 - **Hybrid ranking.** Vector cosine similarity and PostgreSQL full-text search
-  (a generated `tsvector` column, GIN-indexed, queried with
-  `websearch_to_tsquery`) each produce a ranked list, merged with reciprocal
-  rank fusion (k = 60). Full-text search catches exact terms (names, codes,
-  section numbers) that embeddings blur.
+  (a generated `tsvector` column, GIN-indexed) each produce a ranked list of
+  `DOCUMENT_CANDIDATES` (20), merged with reciprocal rank fusion (k = 60),
+  which uses ranks only because the two scores are on unrelated scales.
+  The keyword query is built in Python, not with `websearch_to_tsquery`: that
+  function ANDs every word, so a natural question ("what was the revenue
+  growth") matched only chunks containing all of *what*, *was*, *the*,
+  *revenue*, and *growth*. Instead, common English words are dropped, the
+  rest are reduced to letters and digits (so no text-search operator can be
+  injected), and joined with OR.
 - **Relevance floor.** A chunk qualifies only if its cosine similarity is at
-  least `DOCUMENT_MIN_SIMILARITY` or it matches the full-text query. With no
-  qualifying chunk the run behaves like an empty web search: `answer_direct`
-  with a notice, never `synthesize` over irrelevant text. The default floor is
-  set from the evaluation dataset, not guessed.
+  least `DOCUMENT_MIN_SIMILARITY`, or it exactly contains a question term that
+  has a digit in it (a part number, an invoice number, a year): those are what
+  embeddings blur and what the keyword half is for. An earlier draft let *any*
+  keyword match bypass the floor; the retrieval eval below showed ordinary
+  shared words ("company", "board", "office") then passed irrelevant chunks,
+  raising the unanswerable-question leak from 30% to 40% with no recall
+  gained, so ordinary words now only help rank. With no qualifying chunk the
+  run behaves like an empty web search: `answer_direct` with a notice, never
+  `synthesize` over irrelevant text.
+- **The floor is 0.25, calibrated** with `evals/retrieval.py` against
+  `text-embedding-3-small`, real PostgreSQL, and a labelled set of 12 report
+  passages and 28 questions (2026-10-20). The correct passage for an
+  answerable question never scored below 0.327 (median 0.518); off-topic
+  questions never above 0.114. Any floor from 0.15 to 0.30 kept every answer
+  and excluded every off-topic question. 0.25 keeps a margin on both sides;
+  0.30 would sit 0.027 under the weakest real answer, and missing a real
+  answer ("your documents don't cover this") costs the user more than the
+  alternative below.
+- **Near misses are a known limit.** A question that sounds like the document
+  but is not answered by it ("what was the chief executive paid?") scored up
+  to 0.51, inside the range of real answers; no floor separates them. They
+  reach the model, which is instructed to say when the excerpts do not answer
+  the question; the `doc-near-miss` eval case checks it does, against the
+  real model too.
 - **Budget.** At most `DOCUMENT_TOP_K` (6) chunks and
   `DOCUMENT_CONTEXT_CHARS` (12,000) characters reach the prompt.
 - **Query.** When the model-based routing step runs, it also returns a
   standalone `document_query`, so a follow-up such as "what about the second
-  one?" is rewritten using the conversation. When a heuristic decides, the
-  question is used as written. That is a known weakness, measured by a
-  follow-up eval case.
+  one?" is rewritten using the conversation. When a heuristic decides, a
+  question of six words or fewer is searched together with the previous
+  question, a cheap stand-in for a rewrite. Against the real model the
+  `doc-follow-up` case got the cleaner rewrite ("What does the report say
+  about costs?").
+- **Query tokens are recorded, not refused.** Each question's embedding is
+  written to `embedding_usage` as a `query`, but a run is not blocked on the
+  embedding quota: a question costs tens of tokens, and refusing to read the
+  documents mid-conversation would be worse than the spend it saves.
 - The query embedding counts against the 90-second run deadline and has its own
   timeout (`DOCUMENT_QUERY_TIMEOUT_SECONDS`, 10), with one retry for transient
   failures. `EMBEDDING_TIMEOUT_SECONDS` (30) bounds each provider request,
@@ -182,9 +213,22 @@ START -> decide_retrieval -> [retrieve_documents] -> [web_search] -> synthesize 
   message is not a greeting or a task on text already supplied. Document
   retrieval costs one embedding call (about $0.000001), so it does not wait for
   the model to ask for it; the relevance floor discards irrelevant results.
-  `search_decision` keeps its current heuristic-then-model logic.
+  `search_decision` keeps its current heuristic-then-model logic, with one
+  addition: a question that names the documents ("the report", "the PDF", "the
+  attached file") does not search the web unless it asks for the web. Without
+  that, "summarize the latest report I uploaded" would search the web for
+  "latest". The routing model is told which documents are attached.
+- The run executor reads the conversation's ready documents once, before the
+  graph starts, so routing needs no database access.
+- When retrieval fails or finds nothing and the answer comes from the model's
+  own knowledge, the answering prompt is told which happened. Without it, the
+  real model answered an outage with "I cannot access or summarize uploaded
+  files", which is false; with it, it says the documents could not be read
+  this time.
 - Both retrieval nodes are optional, so the longest path is five steps. There
-  is still no back edge.
+  is still no back edge. `web_search` appends its sources to the document
+  sources already in state; `sources` has no reducer, so a plain return would
+  have silently dropped them.
 - Labels: web sources stay `S1…`, and document chunks are `D1…`. The prefix
   tells the model, the validator, and the reader what kind of source a claim
   rests on. The citation regexes (backend validator and frontend
