@@ -51,6 +51,18 @@ from settings, opens the LangGraph checkpointer, and compiles the agent graph
 once. A graph compiled per request would rebuild its node table on every
 message; a provider client per request would open a new connection pool.
 
+It also builds the pieces behind PDF documents (ADR-0015): the embedding
+provider (`app/providers/embeddings.py`), the PDF parser (`app/services/pdf.py`),
+which starts a forkserver and parses each upload in a child process of its
+own, and the ingestion manager (`app/services/ingestion.py`). An upload stores
+extracted text as chunks and returns; the ingestion manager is a background
+task, one per process, that writes the embeddings. Replicas share that work
+through the database: a document is claimed with `FOR UPDATE SKIP LOCKED` and
+held by a time lease, so a process that dies mid-document leaves it to the
+next sweep, which resumes from the first chunk without a vector. On shutdown
+the run manager drains first, then ingestion stops, then the providers and the
+database close.
+
 ## Configuration
 
 Every configurable value is declared on `Settings` (`app/core/config.py`) and
@@ -110,8 +122,9 @@ not race (Phase 8).
 
 PostgreSQL runs on the `pgvector/pgvector` image, which adds the `vector`
 column type for document-chunk embeddings ([ADR-0015](adr/0015-chat-scoped-pdf-retrieval.md)).
-The `documents` and `document_chunks` tables exist from that migration on; the
-upload API and retrieval that use them arrive in later Phase 11 slices. The
+The `documents` and `document_chunks` tables back the upload API; retrieval
+that uses them in answers arrives in a later Phase 11 slice. An append-only
+`embedding_usage` table records tokens spent per user for the daily quota. The
 image is Debian-based where the previous one was Alpine, so the migration
 refuses a data volume carried across from the old image, whose text indexes
 would be sorted under a different C library (`app/db/migrations_helpers.py`;

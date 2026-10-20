@@ -11,6 +11,7 @@ from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -181,7 +182,8 @@ class Settings(BaseSettings):
     # --- Embedding provider (ADR-0015) ---
     # Configured separately from the chat model on purpose: LLM_BASE_URL may
     # name a provider with no embeddings API at all, and the two must be free
-    # to change independently.
+    # to change independently. Empty reuses LLM_API_KEY when both base URLs
+    # are on the same host; see ``effective_embedding_api_key``.
     embedding_api_key: str = ""
     embedding_base_url: str = "https://api.openai.com/v1"
     # OpenAI's cheapest embedding model when chosen (2026-10-19): $0.02 per 1M
@@ -193,6 +195,33 @@ class Settings(BaseSettings):
     # Chunks per request. OpenAI caps a request at 300,000 tokens across all
     # inputs; 100 chunks of ~500 tokens stays far below that.
     embedding_batch_size: int = Field(default=100, ge=1, le=500)
+
+    # --- Documents (ADR-0015) ---
+    # A 10 MiB PDF is a long report; anything bigger is usually scans, which
+    # carry no text to read anyway.
+    max_document_bytes: int = Field(default=10_485_760, ge=1)
+    max_document_pages: int = Field(default=200, ge=1)
+    # Extracted text. About 125,000 tokens, roughly $0.0025 to embed.
+    max_document_chars: int = Field(default=500_000, ge=1)
+    max_chunks_per_document: int = Field(default=400, ge=1)
+    max_documents_per_conversation: int = Field(default=5, ge=1)
+    # Parsing runs in child processes (app/services/pdf.py). Each one may use
+    # this much address space and this long before it is killed.
+    document_parse_workers: int = Field(default=2, ge=1)
+    document_parse_timeout_seconds: float = Field(default=30.0, gt=0)
+    document_parse_memory_mb: int = Field(default=1024, ge=128)
+    # Uploads per user per window. Each one costs parse time and embeddings.
+    rate_limit_document_uploads: int = 10
+    rate_limit_document_uploads_window_seconds: int = 600
+    # Embedding tokens per user in any rolling 24 hours, uploads and queries
+    # together. 2,000,000 tokens of text-embedding-3-small is about $0.04.
+    daily_embedding_token_limit_per_user: int = Field(default=2_000_000, ge=1)
+    # Background embedding (app/services/ingestion.py). A worker owns a
+    # document for one lease, renewed after every batch; a crashed worker's
+    # document is picked up by the sweep once the lease runs out.
+    document_embed_lease_seconds: float = Field(default=120.0, gt=0)
+    document_embed_max_attempts: int = Field(default=3, ge=1)
+    document_ingestion_sweep_seconds: float = Field(default=30.0, gt=0)
 
     # --- Agent budgets ---
     max_searches_per_run: int = 3
@@ -291,6 +320,11 @@ class Settings(BaseSettings):
             problems.append("LLM_API_KEY is required in production")
         if not self.search_api_key:
             problems.append("SEARCH_API_KEY is required in production")
+        if not self.effective_embedding_api_key:
+            problems.append(
+                "EMBEDDING_API_KEY is required in production (PDF documents) unless "
+                "LLM_BASE_URL is on the same host as EMBEDDING_BASE_URL, whose key is then reused"
+            )
         # Without it, run locks and rate limits are per process: each replica
         # would coordinate only with itself.
         if not self.redis_url:
@@ -336,6 +370,28 @@ class Settings(BaseSettings):
         blocks the conversation no longer than its dead run row already would.
         """
         return self.run_timeout_seconds + self.run_stale_grace_seconds
+
+    @property
+    def effective_embedding_api_key(self) -> str:
+        """The key embedding requests are sent with.
+
+        ``EMBEDDING_API_KEY`` when set. Otherwise ``LLM_API_KEY``, but only
+        when the chat endpoint is on the same host as the embeddings endpoint
+        (both OpenAI, by default): then it is the same provider's key. With a
+        chat model elsewhere (Groq, OpenRouter), reusing its key would hand
+        one provider's credential to another, so there is no fallback.
+        """
+        if self.embedding_api_key:
+            return self.embedding_api_key
+        same_host = (
+            urlsplit(self.llm_base_url).hostname == urlsplit(self.embedding_base_url).hostname
+        )
+        return self.llm_api_key if same_host else ""
+
+    @property
+    def max_upload_body_bytes(self) -> int:
+        """Body limit for the upload route: the file plus multipart framing."""
+        return self.max_document_bytes + 64 * 1024
 
     @property
     def expose_api_docs(self) -> bool:

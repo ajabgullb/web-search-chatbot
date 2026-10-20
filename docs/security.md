@@ -257,8 +257,13 @@ conversation; a message id taken from another user's thread is `404`.
 Idempotency keys are scoped per user, so one client's key can never collide
 with, or replay, another user's run.
 
+Documents follow the same rule, scoped by `user_id` and by conversation:
+another user's document, and a real document id requested under the wrong
+conversation, both answer `404`.
+
 Deletion is soft: the row is stamped `deleted_at` and disappears from every read
-path. Deleting a conversation also cancels its active run. Rows therefore accumulate; a retention/purge policy is a later concern and
+path. Uploaded documents are the exception: they are hard-deleted (see
+[Uploaded documents](#uploaded-documents)). Deleting a conversation also cancels its active run. Rows therefore accumulate; a retention/purge policy is a later concern and
 is not implemented.
 
 ## Untrusted content rendering
@@ -374,6 +379,54 @@ messages. Production also serves no `/docs` and no `/openapi.json`.
 rule and to check that no secret appears in the output. These checks are never
 relaxed to make an environment start.
 
+## Uploaded documents
+
+PDF upload ([ADR-0015](adr/0015-chat-scoped-pdf-retrieval.md)) is the one
+place the API accepts a file, and a PDF is attacker-controlled input to a
+complex parser.
+
+- **Checked before the body is read.** The upload handler does not declare
+  the file as a FastAPI parameter, which would have the whole body read and
+  spooled before any dependency ran. Authentication, the per-user upload rate
+  limit, email verification, and conversation ownership are all checked first.
+- **Size limits on one route only.** nginx (`client_max_body_size 11m`) and
+  the API's body-size middleware raise the limit for `POST` on the upload path
+  and nowhere else; every other route keeps 256 KiB.
+- **The bytes decide.** A file is a PDF only if `%PDF-` appears in its first
+  1024 bytes. The declared content type and the file name are ignored.
+- **Parsed in a disposable process.** Each parse runs in a child process
+  forked from a forkserver that has loaded nothing but `pypdf`: no settings,
+  no secrets, no open sockets. The child has an address-space limit
+  (`DOCUMENT_PARSE_MEMORY_MB`) and is killed at
+  `DOCUMENT_PARSE_TIMEOUT_SECONDS`. A hang, a crash, or a memory blow-up is
+  reported as `pdf_too_complex`; none of them reaches the API process. At most
+  `DOCUMENT_PARSE_WORKERS` parses run at once, and a further upload gets `503`
+  rather than queueing in memory.
+- **No file is kept.** The bytes exist only for the request (Starlette spools
+  a multipart file over 1 MiB to a temporary file, deleted when the request
+  ends). Only extracted text is stored, as chunks.
+- **Names are data.** The filename is reduced to a base name with control
+  characters removed: it is shown to users and will reach the model as a
+  source title, where a newline could break the untrusted-content fence.
+- **Spend is capped per user**, in tokens per rolling 24 hours, from an
+  append-only ledger (`embedding_usage`). The ledger is not linked to
+  documents, so deleting and re-uploading does not reset it.
+- **Deletion is real.** Documents are hard-deleted, never soft-deleted, with
+  their chunks. Deleting a conversation hard-deletes its documents in the same
+  transaction. Both also erase the conversation's LangGraph checkpoints
+  through the checkpointer's own `adelete_thread`, because retrieved text will
+  pass through graph state. Deleted text remains in database backups until
+  they rotate out (`BACKUP_KEEP_DAYS`).
+- **A third party sees the text.** Document text is sent to OpenAI's
+  embeddings endpoint, and queries will be too.
+- **Keys stay with their provider.** With no `EMBEDDING_API_KEY`, the chat
+  key is reused only if the chat endpoint is on the embeddings host. A Groq or
+  OpenRouter key is never sent to OpenAI.
+- **No deadlock with deletes.** A batch of embeddings locks the document row
+  before its chunks, the order a delete takes them in. The reverse order
+  deadlocked against a concurrent delete, which then failed with a 500; a
+  test reproduces that interleaving deterministically.
+
 ## Request limits
 
 Bodies over `MAX_REQUEST_BODY_BYTES` (256 KiB) are refused with
@@ -383,7 +436,8 @@ arrives. The limit is sized so that any valid message fits however it is
 encoded. The worst case, 16,000 emoji ASCII-escaped by the client, is about
 192 KB. Other bounds: message length (16,000 characters), output tokens,
 results per search, per-search and per-run timeouts, and the database pool
-size and checkout timeout.
+size and checkout timeout. The PDF upload route is the one exception; see
+[Uploaded documents](#uploaded-documents).
 
 ## Not yet implemented
 

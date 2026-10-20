@@ -179,6 +179,40 @@ the rendered source list in first-use order. `degraded` is true when a searched
 answer could not be tied to a source or search was unavailable; `notice` is one
 sentence explaining it, ready to show.
 
+### Documents
+
+PDFs uploaded to one conversation ([ADR-0015](adr/0015-chat-scoped-pdf-retrieval.md)).
+A document belongs to that conversation only. Answers do not use documents
+yet; retrieval arrives in a later Phase 11 slice.
+
+| Method and path | Purpose |
+| --- | --- |
+| `POST /conversations/{id}/documents` | Upload a PDF as `multipart/form-data`, field `file` |
+| `GET /conversations/{id}/documents` | Every document in the conversation, in upload order (`{"items": [...]}`) |
+| `GET /conversations/{id}/documents/{document_id}` | One document; poll this while `status` is `processing` |
+| `DELETE /conversations/{id}/documents/{document_id}` | Remove it and its text (`204`) |
+
+An upload returns `202` at once with `status: "processing"`. The text has been
+extracted and stored; embeddings are written in the background, and `status`
+becomes `ready` or `failed` (with `error_code`, today only
+`embedding_unavailable`). The same file uploaded again to the same
+conversation returns `200` with the existing document, unchanged.
+
+```json
+{
+  "id": "...", "filename": "report.pdf", "status": "processing",
+  "error_code": null, "byte_size": 48213, "page_count": 12, "chunk_count": 19,
+  "created_at": "...", "updated_at": "..."
+}
+```
+
+Limits: 10 MiB, 200 pages, 500,000 characters of text, 5 documents per
+conversation, 10 uploads per user per 10 minutes, and a daily embedding-token
+allowance per user. Uploads need a confirmed email address. Text is never
+returned by the API; only metadata. Removing a document is refused with
+`409 run_in_progress` while the conversation is answering a message.
+Deleting a conversation deletes its documents.
+
 ### Runs
 
 A run is one execution of the agent answering one user message.
@@ -320,6 +354,14 @@ is set only when `failed`; `cancel_reason` only when `cancelled`.
 | `message_empty` | 422 | The message is blank after trimming |
 | `message_too_long` | 422 | Over `MAX_USER_MESSAGE_CHARS`; `details` has the limit and length |
 | `invalid_cursor` | 400 | Pagination cursor was not produced by this API |
+| `document_not_found` | 404 | Unknown document, or one not in this conversation |
+| `pdf_invalid` | 422 | Not a PDF (judged by its bytes, not its name or type), or one that cannot be read |
+| `pdf_encrypted` | 422 | The PDF needs a password to open |
+| `pdf_no_text` | 422 | No extractable text, usually a scan; there is no OCR |
+| `pdf_too_large` | 413 | Over a size limit; `details.limit` is `bytes`, `pages`, `characters`, or `chunks`, and `details.max` the limit |
+| `pdf_too_complex` | 422 | Reading it took more time or memory than allowed |
+| `document_limit_reached` | 409 | The conversation already holds `MAX_DOCUMENTS_PER_CONVERSATION` documents |
+| `embedding_quota_exceeded` | 429 | The upload would pass `DAILY_EMBEDDING_TOKEN_LIMIT_PER_USER`; `details` has `limit` and `retry_after_seconds` (also `Retry-After`) |
 | `payload_too_large` | 413 | Body over `MAX_REQUEST_BODY_BYTES`; `details.max_bytes` when the size was declared |
-| `service_unavailable` | 503 | A required dependency (Redis for run creation, SMTP for resending a confirmation) is down; retry shortly |
+| `service_unavailable` | 503 | A required dependency (Redis for run creation, SMTP for resending a confirmation) is down, or every PDF parse slot is busy; retry shortly |
 | `internal_error` | 500 | Unexpected failure; quote `request_id` |

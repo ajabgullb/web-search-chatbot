@@ -38,6 +38,7 @@ ENV API_UPSTREAM=http://api:8000 \
     TRUSTED_PROXY_CIDRS=""
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY nginx/security-headers.conf /etc/nginx/snippets/security-headers.conf
+COPY nginx/api-proxy.conf /etc/nginx/snippets/api-proxy.conf
 # Executable regardless of the checkout's file modes; the entrypoint skips
 # scripts that are not.
 COPY --chmod=0755 nginx/25-real-ip.sh /docker-entrypoint.d/25-real-ip.sh

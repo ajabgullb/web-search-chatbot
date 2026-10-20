@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 
@@ -22,6 +23,7 @@ from app.agent.graph import build_graph
 from app.agent.tracing import build_tracing
 from app.api.errors import register_exception_handlers
 from app.api.middleware import (
+    BodyLimitOverride,
     BodySizeLimitMiddleware,
     RequestIdMiddleware,
     SecurityHeadersMiddleware,
@@ -35,8 +37,11 @@ from app.core.run_lock import build_run_lock
 from app.core.run_signals import RedisCancelSignal
 from app.db.session import Database
 from app.providers.email import build_email_sender
+from app.providers.embeddings import build_embedding_provider
 from app.providers.llm import build_llm_provider
 from app.providers.search import build_search_provider
+from app.services.ingestion import IngestionManager
+from app.services.pdf import PdfParser
 from app.services.run_executor import RunManager
 
 logger = logging.getLogger(__name__)
@@ -69,13 +74,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.cancel_signal = cancel_signal
 
+    # Documents (ADR-0015). The provider is looked up through app.state on
+    # every batch, so a test can swap it on a running app.
+    app.state.embedding_provider = build_embedding_provider(settings)
+    app.state.pdf_parser = PdfParser.from_settings(settings)
+    app.state.ingestion = IngestionManager(
+        app.state.database, settings, embeddings=lambda: app.state.embedding_provider
+    )
+
     logger.info(
         "app_started",
         extra={"environment": settings.environment.value, "redis": app.state.redis is not None},
     )
     async with AsyncExitStack() as stack:
         checkpointer = await stack.enter_async_context(checkpointer_for(settings))
+        app.state.checkpointer = checkpointer
         app.state.agent_graph = build_graph(checkpointer)
+        app.state.ingestion.start()
         listener = (
             asyncio.create_task(
                 cancel_signal.listen(app.state.run_manager.on_cancel_signal),
@@ -98,6 +113,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await app.state.run_manager.shutdown(
                 drain_seconds=app.state.settings.shutdown_drain_seconds
             )
+            # Stopped mid-batch if need be: its lease expires and another
+            # process, or this one after a restart, picks the document up.
+            await app.state.ingestion.shutdown()
+            await app.state.embedding_provider.aclose()
             await app.state.search_provider.aclose()
             await app.state.tracing.aclose()
             if app.state.redis is not None:
@@ -142,7 +161,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # anything else and is available to every handler and log record. The
     # body limit is innermost: its 413 still passes through CORS (so a browser
     # can read it) and gets the security headers.
-    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_body_bytes)
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        max_bytes=settings.max_request_body_bytes,
+        overrides=[
+            BodyLimitOverride(
+                method="POST",
+                path=re.compile(
+                    rf"{re.escape(settings.api_v1_prefix)}/conversations/[^/]+/documents"
+                ),
+                max_bytes=settings.max_upload_body_bytes,
+            )
+        ],
+    )
     app.add_middleware(SecurityHeadersMiddleware, settings=settings)
     # Explicit origins only: credentialed requests may never use a wildcard.
     app.add_middleware(

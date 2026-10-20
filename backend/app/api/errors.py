@@ -187,6 +187,64 @@ class MessageTooLong(AppError):
     message = "The message is too long."
 
 
+class DocumentNotFound(NotFound):
+    """Same rule as conversations: another user's document is indistinguishable
+    from one that never existed."""
+
+    code = "document_not_found"
+    message = "Document not found."
+
+
+class PdfInvalid(AppError):
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "pdf_invalid"
+    message = "The file is not a readable PDF."
+
+
+class PdfEncrypted(AppError):
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "pdf_encrypted"
+    message = "The PDF is password-protected. Upload a copy without a password."
+
+
+class PdfNoText(AppError):
+    """Usually a scan: pages that are pictures of text. There is no OCR."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "pdf_no_text"
+    message = "The PDF contains no text that can be read. Scanned pages are not supported."
+
+
+class PdfTooLarge(AppError):
+    """Over a limit the user can act on, by splitting the document."""
+
+    status_code = status.HTTP_413_CONTENT_TOO_LARGE
+    code = "pdf_too_large"
+    message = "The PDF is too large."
+
+
+class PdfTooComplex(AppError):
+    """Over a limit the user cannot act on: parse time or memory."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "pdf_too_complex"
+    message = "The PDF could not be read in the time and memory allowed."
+
+
+class DocumentLimitReached(AppError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "document_limit_reached"
+    message = "This conversation already has the maximum number of documents."
+
+
+class EmbeddingQuotaExceeded(AppError):
+    """Like ``daily_quota_exceeded``: a short wait will not help."""
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    code = "embedding_quota_exceeded"
+    message = "You have reached the daily limit for reading documents."
+
+
 class InvalidCursor(AppError):
     status_code = status.HTTP_400_BAD_REQUEST
     code = "invalid_cursor"

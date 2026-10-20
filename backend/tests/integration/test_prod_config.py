@@ -33,6 +33,7 @@ VALID_PRODUCTION = {
     "REDIS_URL": "redis://redis:6379/0",
     "LLM_API_KEY": LLM_KEY,
     "SEARCH_API_KEY": "tvly-leakcheck-0123456789",
+    "EMBEDDING_API_KEY": "sk-embed-leakcheck-0123456789",
     "SMTP_HOST": "smtp.example.com",
     "SMTP_SECURITY": "starttls",
     "LOG_LEVEL": "INFO",
@@ -59,6 +60,12 @@ def test_a_valid_production_configuration_starts() -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_an_openai_chat_key_covers_embeddings() -> None:
+    """No separate EMBEDDING_API_KEY when the chat model is OpenAI's own API."""
+    result = boot(EMBEDDING_API_KEY="")
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     ("override", "complaint"),
     [
@@ -67,6 +74,10 @@ def test_a_valid_production_configuration_starts() -> None:
         ({"FRONTEND_ORIGIN": "http://chat.example.com"}, "https"),
         ({"LLM_API_KEY": ""}, "LLM_API_KEY"),
         ({"SEARCH_API_KEY": ""}, "SEARCH_API_KEY"),
+        (
+            {"EMBEDDING_API_KEY": "", "LLM_BASE_URL": "https://api.groq.com/openai/v1"},
+            "EMBEDDING_API_KEY",
+        ),
         ({"REDIS_URL": ""}, "REDIS_URL"),
         ({"DATABASE_URL": "postgresql+asyncpg://app:app@db:5432/app"}, "database password"),
         ({"SMTP_HOST": ""}, "SMTP_HOST"),
@@ -93,7 +104,7 @@ def test_the_error_never_echoes_configured_secrets() -> None:
     result = boot(JWT_SECRET="short", REDIS_URL="")
 
     assert result.returncode != 0
-    for secret in (LLM_KEY, DB_PASSWORD, "tvly-leakcheck"):
+    for secret in (LLM_KEY, DB_PASSWORD, "tvly-leakcheck", "sk-embed-leakcheck"):
         assert secret not in result.stderr
         assert secret not in result.stdout
 

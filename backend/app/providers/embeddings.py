@@ -155,9 +155,10 @@ class OpenAIEmbeddings:
         self._model = settings.embedding_model
         self._dimensions = settings.embedding_dimensions
         self._max_batch_size = settings.embedding_batch_size
-        self._configured = bool(settings.embedding_api_key)
+        api_key = settings.effective_embedding_api_key
+        self._configured = bool(api_key)
         self._client = AsyncOpenAI(
-            api_key=settings.embedding_api_key or "not-set",
+            api_key=api_key or "not-set",
             base_url=settings.embedding_base_url,
             timeout=settings.embedding_timeout_seconds,
             # The SDK would otherwise retry on its own. The caller owns the one
@@ -185,7 +186,10 @@ class OpenAIEmbeddings:
             # Known before any request: a development machine without a key
             # gets a clear failure, not a 401 round-trip that looks like a
             # revoked credential.
-            raise EmbeddingAuthError("EMBEDDING_API_KEY is not set")
+            raise EmbeddingAuthError(
+                "no embedding key: set EMBEDDING_API_KEY, or LLM_API_KEY with an LLM_BASE_URL "
+                "on the embeddings host"
+            )
         try:
             response = await self._client.embeddings.create(
                 model=self._model,
