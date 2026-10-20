@@ -47,7 +47,10 @@ x-api-environment: &api-environment
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # PostgreSQL 16 with pgvector (ADR-0015). Debian-based, unlike the old
+    # postgres:16-alpine: a data volume from that image must be dumped and
+    # restored, not reattached, because the two sort text differently.
+    image: pgvector/pgvector:0.8.7-pg16-bookworm
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
@@ -126,8 +129,9 @@ services:
     restart: unless-stopped
 
   backup:
-    # Same major version as the server: pg_dump must not be older than it.
-    image: postgres:16-alpine
+    # The server's own image: pg_dump must not be older than the server, and
+    # it must know the vector type it is dumping.
+    image: pgvector/pgvector:0.8.7-pg16-bookworm
     command: ['sh', '/deploy/backup.sh']
     environment:
       PGHOST: postgres

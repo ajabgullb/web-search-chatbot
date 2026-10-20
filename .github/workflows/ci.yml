@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:0.8.7-pg16-bookworm
         env:
           POSTGRES_USER: app
           POSTGRES_PASSWORD: app
@@ -122,7 +122,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:0.8.7-pg16-bookworm
         env:
           POSTGRES_USER: app
           POSTGRES_PASSWORD: app

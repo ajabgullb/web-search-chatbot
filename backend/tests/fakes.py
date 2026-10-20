@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import math
+import re
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
 
 from langchain_core.messages import AnyMessage
 
 from app.agent.routing import SearchDecision
+from app.core.config import EMBEDDING_VECTOR_DIMENSIONS
 from app.providers.email import EmailPayload
+from app.providers.embeddings import EmbeddingBatch, validate_inputs
 from app.providers.llm import LLMChunk, StructuredT
 from app.providers.search import SearchHit
 
@@ -186,3 +191,70 @@ def hit(
         publisher=publisher,
         published_at=published_at,
     )
+
+
+_WORD = re.compile(r"\w+")
+
+
+class FakeEmbeddings:
+    """A deterministic embedder whose similarity means something.
+
+    Each word is hashed to one dimension and a sign, and the counts are
+    L2-normalised: a hashed bag of words. Texts that share words score as
+    similar and texts that share none score near zero, so a retrieval test can
+    assert which chunk ranks first without a model. ``blake2b`` rather than
+    ``hash()``, which is salted per process and would change between runs.
+    """
+
+    def __init__(
+        self,
+        *,
+        dimensions: int = EMBEDDING_VECTOR_DIMENSIONS,
+        model: str = "fake-embedding",
+        max_batch_size: int = 100,
+        error: Exception | None = None,
+        fail_times: int | None = None,
+    ) -> None:
+        self._dimensions = dimensions
+        self._model = model
+        self._max_batch_size = max_batch_size
+        self._error = error
+        # None means "fail forever"; an integer fails that many calls first.
+        self._fail_times = fail_times
+        self.calls: list[list[str]] = []
+        self.closed = False
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @property
+    def dimensions(self) -> int:
+        return self._dimensions
+
+    @property
+    def max_batch_size(self) -> int:
+        return self._max_batch_size
+
+    def vector(self, text: str) -> list[float]:
+        values = [0.0] * self._dimensions
+        for word in _WORD.findall(text.lower()):
+            digest = hashlib.blake2b(word.encode(), digest_size=8).digest()
+            index = int.from_bytes(digest[:4], "big") % self._dimensions
+            values[index] += 1.0 if digest[4] & 1 else -1.0
+        norm = math.sqrt(sum(value * value for value in values))
+        # A text of only punctuation still needs a storable, finite vector.
+        return [value / norm for value in values] if norm else values
+
+    async def embed(self, texts: Sequence[str]) -> EmbeddingBatch:
+        validate_inputs(texts, max_batch_size=self._max_batch_size)
+        self.calls.append(list(texts))
+        if self._error is not None and (
+            self._fail_times is None or len(self.calls) <= self._fail_times
+        ):
+            raise self._error
+        tokens = sum(len(_WORD.findall(text)) for text in texts)
+        return EmbeddingBatch(vectors=[self.vector(text) for text in texts], tokens=tokens)
+
+    async def aclose(self) -> None:
+        self.closed = True

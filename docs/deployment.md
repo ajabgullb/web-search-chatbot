@@ -140,6 +140,65 @@ docker compose --env-file .env.production -f compose.prod.yaml run --rm \
 `restore.sh` runs `pg_restore` in a single transaction: if it fails part-way,
 the database is left as it was.
 
+## 5. Moving to the pgvector image
+
+Document retrieval ([ADR-0015](adr/0015-chat-scoped-pdf-retrieval.md))
+replaced `postgres:16-alpine` with `pgvector/pgvector:0.8.7-pg16-bookworm`.
+Both are PostgreSQL 16, but Alpine uses musl and the pgvector image uses
+glibc, and the two sort `en_US.utf8` text differently. **Do not start the new
+image on the old data volume.** PostgreSQL would start without any warning,
+and text indexes, including the unique index on `users.email`, could then
+return wrong results. The documents migration detects this and refuses to
+run, but a refused migration still means downtime, so move the data this way
+instead.
+
+Restore into the new, empty volume **before** the migration job runs. If the
+migrations ran first, the restored `alembic_version` would point back at the
+old revision, and the next upgrade would fail on tables that already exist.
+
+```bash
+PROD="docker compose --env-file .env.production -f compose.prod.yaml"
+
+# 1. On the old release: a fresh dump, checked, then stop everything.
+make prod-backup
+ls -t backups/app-*.dump | head -1                     # note the file name
+$PROD run --rm backup pg_restore --list /backups/<file> > /dev/null && echo dump ok
+make prod-down
+
+# 2. Remove the old volume. The dump is now the only copy: copy it off the
+#    machine first (section 4).
+docker volume rm web-search-chatbot-prod_postgres-data
+
+# 3. On the new release: start only PostgreSQL, restore, then migrate and start.
+$PROD up -d --wait postgres
+$PROD run --rm backup sh /deploy/restore.sh /backups/<file>
+make prod-up                                            # migration job, then the API
+```
+
+Compare row counts (`users`, `conversations`, `messages`, `runs`,
+`citations`, `checkpoints`) with the old database before reopening traffic. To
+roll back, check out the previous release, remove the new volume, and restore
+the same dump with the old image.
+
+The procedure was rehearsed on 2026-10-19 with a development database:
+identical row counts after the restore, a clean upgrade to the documents
+revision, and all 37 B-tree indexes verified with PostgreSQL's `amcheck`
+under the new collation.
+
+**Development** uses the same steps with the development compose file. Dump
+while the old container is still running, before the next `docker compose up`:
+
+```bash
+docker compose exec -T postgres pg_dump -U app -d app -Fc > dev.dump
+docker compose down
+docker volume rm web-search-chatbot_postgres-data
+docker compose up -d --wait postgres
+docker compose exec -T postgres pg_restore -U app -d app --no-owner --single-transaction < dev.dump
+make dev
+```
+
+If the development data is disposable, skip the dump and the restore.
+
 ## Capacity
 
 See [load-testing.md](load-testing.md) for measured numbers, how they were
