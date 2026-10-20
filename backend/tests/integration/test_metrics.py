@@ -112,6 +112,55 @@ async def test_provider_failures_are_counted(app: FastAPI, client: AsyncClient) 
     assert failed_runs() == 1
 
 
+async def test_a_failed_run_is_counted_by_its_error_code(app: FastAPI, client: AsyncClient) -> None:
+    await install_providers(app, llm=FakeLLM(answer_error=LLMPermanentError("down")))
+    headers = auth_header(await register(client))
+    conversation = await create_conversation(client, headers)
+    unavailable = delta("run_failures_total", code="llm_unavailable")
+
+    response = await post_run(client, headers, conversation["id"], content="hello")
+
+    assert parse_sse(response.text).terminal["error"]["code"] == "llm_unavailable"
+    assert unavailable() == 1
+
+
+async def test_answers_are_counted_by_source_and_tokens_by_model(
+    app: FastAPI, client: AsyncClient
+) -> None:
+    await install_providers(app, llm=FakeLLM(answers=["Hello there."]))
+    headers = auth_header(await register(client))
+    conversation = await create_conversation(client, headers)
+    model = app.state.settings.llm_model
+    direct = delta("answers_total", source="direct", degraded="false")
+    prompt_tokens = delta("llm_tokens_total", kind="prompt", model=model)
+    completion_tokens = delta("llm_tokens_total", kind="completion", model=model)
+
+    response = await post_run(client, headers, conversation["id"], content="hi")
+
+    assert parse_sse(response.text).terminal["type"] == "message.completed"
+    assert direct() == 1
+    # The fake reports 11 prompt and 7 completion tokens on its last chunk.
+    assert (prompt_tokens(), completion_tokens()) == (11, 7)
+
+
+async def test_an_answer_whose_search_failed_is_counted_as_degraded(
+    app: FastAPI, client: AsyncClient
+) -> None:
+    await install_providers(
+        app,
+        llm=FakeLLM(answers=["I could not check sources."], decision=SEARCHING),
+        search=FakeSearchProvider(error=SearchPermanentError("bad key")),
+    )
+    headers = auth_header(await register(client))
+    conversation = await create_conversation(client, headers)
+    degraded = delta("answers_total", source="web", degraded="true")
+
+    response = await post_run(client, headers, conversation["id"], content="rates today?")
+
+    assert parse_sse(response.text).terminal["type"] == "message.completed"
+    assert degraded() == 1
+
+
 async def test_rate_limit_refusals_are_counted(app: FastAPI, client: AsyncClient) -> None:
     await install_providers(app, llm=FakeLLM(answers=["a", "b"]))
     app.state.settings.rate_limit_runs = 1

@@ -1,0 +1,13 @@
+# The committed JSON is the dashboard's source of truth. Grafana will not
+# save UI edits over it: change a panel in the UI, then Export -> JSON and
+# overwrite observability/grafana/dashboards/web-search-chatbot.json.
+apiVersion: 1
+
+providers:
+  - name: web-search-chatbot
+    type: file
+    allowUiUpdates: false
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

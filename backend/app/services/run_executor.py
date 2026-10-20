@@ -323,7 +323,11 @@ class RunManager:
                     # stale sweep). Report whatever the database now says.
                     outcome_event = await self._current_outcome(handle, run.id)
                     handle.publish(outcome_event)
-                    telemetry.record_run(outcome_event.type, time.monotonic() - started)
+                    telemetry.record_run(
+                        outcome_event.type,
+                        time.monotonic() - started,
+                        error_code=_failure_code(outcome_event),
+                    )
                     return
 
                 # Read once, before the graph: whether there is anything to
@@ -355,7 +359,9 @@ class RunManager:
                 # the write that records the cancellation would be cancelled too.
                 event = await asyncio.shield(self._record_stop(handle, run.id, reason))
                 handle.publish(event)
-                telemetry.record_run(event.type, time.monotonic() - started)
+                telemetry.record_run(
+                    event.type, time.monotonic() - started, error_code=_failure_code(event)
+                )
                 raise
             except Exception:
                 # Never a raw exception to the client; the traceback stays here.
@@ -399,9 +405,17 @@ class RunManager:
             telemetry.record_run(
                 outcome.type,
                 latency_ms / 1000,
+                error_code=_failure_code(outcome),
+                model=run.model,
                 prompt_tokens=result.prompt_tokens,
                 completion_tokens=result.completion_tokens,
             )
+            if outcome.type == "message.completed":
+                telemetry.record_answer(
+                    searched=result.searched,
+                    read_documents=result.read_documents,
+                    degraded=result.degraded,
+                )
         finally:
             handle.close()
             self._active.pop(run.id, None)
@@ -645,6 +659,10 @@ class RunManager:
             run_id=run_id,
             error=RunErrorRead(code=code, message=describe_run_error(code), retryable=True),
         )
+
+
+def _failure_code(event: RunEventModel) -> str | None:
+    return event.error.code if isinstance(event, RunFailedEvent) else None
 
 
 def _uuid_or_none(value: str | None) -> uuid.UUID | None:

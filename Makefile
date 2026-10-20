@@ -8,7 +8,7 @@ FRONTEND := frontend
 COMPOSE := docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help dev rebuild down logs up-db check-db install migrate migration downgrade \
+.PHONY: help dev dev-observability rebuild down logs up-db check-db install migrate migration downgrade \
         test test-backend test-frontend e2e lint lint-backend lint-frontend \
         format format-check typecheck typecheck-backend typecheck-frontend \
         openapi generate-client clean prod-up prod-down prod-logs prod-backup prod-restore loadtest eval eval-live e2e-install
@@ -22,12 +22,15 @@ help: ## Show this help
 dev: ## Build and start the full stack (api, web, postgres, redis, mailpit)
 	$(COMPOSE) up --build
 
+dev-observability: ## The full stack plus Prometheus and Grafana (dashboard on http://localhost:3000)
+	$(COMPOSE) --profile observability up --build
+
 rebuild: ## Rebuild and restart after adding a dependency
 	$(COMPOSE) up -d --build --force-recreate --renew-anon-volumes
 	@echo "note: --renew-anon-volumes discards the container's cached .venv/node_modules"
 
 down: ## Stop the stack and remove containers
-	$(COMPOSE) down
+	$(COMPOSE) --profile observability down
 
 logs: ## Follow logs from all services
 	$(COMPOSE) logs -f

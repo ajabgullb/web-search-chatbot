@@ -96,5 +96,88 @@ services:
     depends_on:
       - api
 
+  # --- Observability (ADR-0016): `make dev-observability` -------------------
+  # Profiled, so `make dev` starts none of these. Ports bind to 127.0.0.1:
+  # Grafana lets anonymous viewers in, and that must stay on this machine.
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.15.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - '127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090'
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:9090/-/ready']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      - api
+
+  grafana-db-reader:
+    # One-shot: creates or refreshes Grafana's read-only database login. It
+    # waits for the API's migrations, because the grants name their columns.
+    profiles: [observability]
+    image: pgvector/pgvector:0.8.7-pg16-bookworm
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-app}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-app}
+      PGDATABASE: ${POSTGRES_DB:-app}
+      READER_PASSWORD: ${GRAFANA_DB_READER_PASSWORD:-grafana_reader}
+    volumes:
+      - ./observability/postgres/grafana_reader.sql:/grafana_reader.sql:ro
+    # The password goes in over stdin: psql expands :'var' there, not in -c.
+    command: >
+      sh -c "until psql -qtAc 'SELECT 1 FROM embedding_usage LIMIT 0' >/dev/null 2>&1;
+             do echo 'waiting for migrations'; sleep 2; done &&
+             psql -v ON_ERROR_STOP=1 -q -f /grafana_reader.sql &&
+             echo \"ALTER ROLE grafana_reader WITH LOGIN PASSWORD :'pw'\" |
+             psql -v ON_ERROR_STOP=1 -q -v pw=\"$$READER_PASSWORD\""
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:13.2.3
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Open the dashboard without logging in; sign in as admin to edit.
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/web-search-chatbot.json
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_NEWS_NEWS_FEED_ENABLED: 'false'
+      # Read by the datasource provisioning file.
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      GRAFANA_DB_READER_PASSWORD: ${GRAFANA_DB_READER_PASSWORD:-grafana_reader}
+    ports:
+      - '127.0.0.1:${GRAFANA_HOST_PORT:-3000}:3000'
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/api/health']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      prometheus:
+        condition: service_started
+      grafana-db-reader:
+        condition: service_completed_successfully
+
 volumes:
   postgres-data:
+  prometheus-data:
+  grafana-data:

@@ -66,6 +66,7 @@ make dev                  # builds and starts api, web, postgres, redis, mailpit
 | API | http://localhost:8000/api/v1 |
 | API docs | http://localhost:8000/api/v1/docs |
 | Mailpit | http://localhost:8025 |
+| Grafana dashboard (`make dev-observability`) | http://localhost:3000 |
 
 A new account must confirm its email before it can chat. In development the
 confirmation email lands in Mailpit: open it there and follow the link.
@@ -205,7 +206,9 @@ make prod-down                               # data volumes are kept
 - **Observability.** JSON logs go to stdout. Prometheus scrapes
   `/api/v1/metrics` with `Authorization: Bearer $METRICS_TOKEN`; without a
   token the endpoint does not exist. LangSmith tracing is optional and never
-  uploads content.
+  uploads content. In development, `make dev-observability` adds Prometheus
+  and a provisioned Grafana dashboard: see
+  [docs/observability.md](docs/observability.md).
 
 **Capacity.** One API process comfortably carries about 50 answers streaming
 at once (roughly 500 answers a minute) and tops out near 700 a minute on one
