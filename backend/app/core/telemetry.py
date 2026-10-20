@@ -51,7 +51,21 @@ TIME_TO_FIRST_TOKEN = Histogram(
     "From run start to the first answer text sent to the client.",
     buckets=_RUN_BUCKETS,
 )
-TOKENS = Counter("llm_tokens_total", "Model tokens reported by the provider.", ["kind"])
+# Labelled by the configured model (a handful of names, not free text) so
+# cost can be priced per model.
+TOKENS = Counter("llm_tokens_total", "Model tokens reported by the provider.", ["kind", "model"])
+# Failures by their stable error code (run_timeout, llm_unavailable, ...): the
+# same closed set the client sees, so "why are runs failing?" has an answer.
+RUN_FAILURES = Counter("run_failures_total", "Failed runs by error code.", ["code"])
+# Completed answers by the evidence the agent went for: direct, web, documents, or
+# documents_and_web. ``degraded`` marks an answer whose evidence could not be
+# verified (a searched answer without one valid citation, or a search that
+# failed). Quality regressions raise no errors; this is where they show.
+ANSWERS = Counter(
+    "answers_total",
+    "Completed answers by evidence source and verification.",
+    ["source", "degraded"],
+)
 
 SEARCHES = Counter("search_requests_total", "Search provider calls by outcome.", ["outcome"])
 SEARCH_DURATION = Histogram(
@@ -130,16 +144,33 @@ def record_run(
     event_type: str,
     seconds: float,
     *,
+    error_code: str | None = None,
+    model: str | None = None,
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
 ) -> None:
     outcome = _RUN_OUTCOMES.get(event_type, "failed")
     RUNS.labels(outcome).inc()
     RUN_DURATION.labels(outcome).observe(seconds)
+    if outcome == "failed":
+        RUN_FAILURES.labels(error_code or "internal_error").inc()
     if prompt_tokens:
-        TOKENS.labels("prompt").inc(prompt_tokens)
+        TOKENS.labels("prompt", model or "unknown").inc(prompt_tokens)
     if completion_tokens:
-        TOKENS.labels("completion").inc(completion_tokens)
+        TOKENS.labels("completion", model or "unknown").inc(completion_tokens)
+
+
+def record_answer(*, searched: bool, read_documents: bool, degraded: bool) -> None:
+    """Called for completed runs only; a failed run produced no answer."""
+    if searched and read_documents:
+        source = "documents_and_web"
+    elif searched:
+        source = "web"
+    elif read_documents:
+        source = "documents"
+    else:
+        source = "direct"
+    ANSWERS.labels(source, str(degraded).lower()).inc()
 
 
 def record_search(outcome: str, seconds: float) -> None:

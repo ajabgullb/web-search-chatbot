@@ -1,0 +1,31 @@
+# Loaded by Grafana at startup. The uids are what the dashboard JSON refers
+# to, so they must not change. ${VAR} is expanded from Grafana's environment.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Matches the scrape interval, so $__rate_interval never asks for a
+      # window shorter than two scrapes.
+      timeInterval: 15s
+
+  - name: App database (read-only)
+    uid: appdb
+    type: grafana-postgresql-datasource
+    url: postgres:5432
+    user: grafana_reader
+    editable: false
+    jsonData:
+      database: ${POSTGRES_DB}
+      sslmode: disable
+      postgresVersion: 1600
+      maxOpenConns: 2
+      maxIdleConns: 1
+    secureJsonData:
+      password: ${GRAFANA_DB_READER_PASSWORD}

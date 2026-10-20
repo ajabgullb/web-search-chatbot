@@ -1,0 +1,14 @@
+# Scrapes the API's /metrics every 15 s and keeps the history (ADR-0016).
+# Development only: the endpoint is open there. A production scrape must
+# present METRICS_TOKEN as a bearer token; see docs/observability.md.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: api
+    metrics_path: /api/v1/metrics
+    static_configs:
+      # The Compose service name; one dev replica. Several replicas would each
+      # need to be listed (or discovered), because each counts only its own work.
+      - targets: ['api:8000']
