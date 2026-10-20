@@ -410,7 +410,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "thinking" | "searching" | "writing";
+            status: "thinking" | "reading_documents" | "searching" | "writing";
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -435,14 +435,28 @@ export interface components {
         };
         /**
          * CitationRead
-         * @description A source an answer cites. ``source_id`` matches the ``[S1]`` markers in
-         *     the message content; ``ordinal`` numbers the rendered source list.
+         * @description A source an answer cites. ``source_id`` matches the ``[S1]`` or ``[D1]``
+         *     markers in the message content; ``ordinal`` numbers the rendered source list.
+         *
+         *     ``kind`` says which: a web page (``url`` and ``display_url`` set) or a
+         *     chunk of one of the user's documents (``document_id`` and ``page`` set,
+         *     ``title`` is the filename, no URL).
          */
         CitationRead: {
             /** Display Url */
-            display_url: string;
+            display_url: string | null;
+            /** Document Id */
+            document_id?: string | null;
+            /**
+             * Kind
+             * @default web
+             * @enum {string}
+             */
+            kind: "web" | "document";
             /** Ordinal */
             ordinal: number;
+            /** Page */
+            page?: number | null;
             /** Published At */
             published_at: string | null;
             /** Publisher */
@@ -459,7 +473,7 @@ export interface components {
             /** Title */
             title: string;
             /** Url */
-            url: string;
+            url: string | null;
         };
         /**
          * ConversationCreate
@@ -569,6 +583,34 @@ export interface components {
          * @enum {string}
          */
         DocumentStatus: "processing" | "ready" | "failed";
+        /**
+         * DocumentsRetrievedEvent
+         * @description Which of the conversation's documents the answer draws on (ADR-0015).
+         *
+         *     Names and counts only, never document text: the passages reach the user
+         *     as citations, and only the ones the answer actually cites.
+         */
+        DocumentsRetrievedEvent: {
+            /** Documents */
+            documents: components["schemas"]["RetrievedDocumentRead"][];
+            /**
+             * Failed
+             * @default false
+             */
+            failed: boolean;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Sequence */
+            sequence: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "documents.retrieved";
+        };
         /** ErrorBody */
         ErrorBody: {
             /**
@@ -779,6 +821,18 @@ export interface components {
             password: string;
             /** Token */
             token: string;
+        };
+        /** RetrievedDocumentRead */
+        RetrievedDocumentRead: {
+            /** Chunk Count */
+            chunk_count: number;
+            /**
+             * Document Id
+             * Format: uuid
+             */
+            document_id: string;
+            /** Filename */
+            filename: string;
         };
         /**
          * RunCancelledEvent
@@ -1685,7 +1739,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": string & (components["schemas"]["RunStartedEvent"] | components["schemas"]["AgentStatusEvent"] | components["schemas"]["SearchStartedEvent"] | components["schemas"]["SearchCompletedEvent"] | components["schemas"]["MessageDeltaEvent"] | components["schemas"]["CitationEvent"] | components["schemas"]["MessageCompletedEvent"] | components["schemas"]["RunFailedEvent"] | components["schemas"]["RunCancelledEvent"]);
+                    "text/event-stream": string & (components["schemas"]["RunStartedEvent"] | components["schemas"]["AgentStatusEvent"] | components["schemas"]["DocumentsRetrievedEvent"] | components["schemas"]["SearchStartedEvent"] | components["schemas"]["SearchCompletedEvent"] | components["schemas"]["MessageDeltaEvent"] | components["schemas"]["CitationEvent"] | components["schemas"]["MessageCompletedEvent"] | components["schemas"]["RunFailedEvent"] | components["schemas"]["RunCancelledEvent"]);
                 };
             };
             /** @description Error envelope, as JSON, for failures before the stream starts. */

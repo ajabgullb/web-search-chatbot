@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from typing import Any
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AnyMessage, HumanMessage
 
-from app.agent.context import AgentContext, AgentLimits
+from app.agent.context import AgentContext, AgentLimits, DocumentRetriever
 from app.agent.graph import AgentResult, build_graph, run_agent
 from app.providers.llm import LLMProvider
 from app.providers.search import SearchProvider
@@ -32,6 +33,8 @@ def make_context(
     search: SearchProvider,
     *,
     limits: AgentLimits = DEFAULT_LIMITS,
+    documents: DocumentRetriever | None = None,
+    ready_documents: tuple[str, ...] = (),
 ) -> AgentContext:
     return AgentContext(
         user_id=uuid.uuid4(),
@@ -41,6 +44,8 @@ def make_context(
         search=search,
         limits=limits,
         request_id="test-request",
+        documents=documents,
+        ready_documents=ready_documents,
     )
 
 
@@ -55,11 +60,20 @@ def run() -> Callable[..., object]:
         llm: LLMProvider,
         search: SearchProvider,
         limits: AgentLimits = DEFAULT_LIMITS,
+        documents: Any = None,
+        history: list[AnyMessage] | None = None,
     ) -> AgentResult:
+        """``documents`` is a retriever; its ``filenames`` become the ready documents."""
         return await run_agent(
             graph,
-            context=make_context(llm, search, limits=limits),
-            history=[HumanMessage(content=message)],
+            context=make_context(
+                llm,
+                search,
+                limits=limits,
+                documents=documents,
+                ready_documents=tuple(documents.filenames) if documents is not None else (),
+            ),
+            history=[*(history or []), HumanMessage(content=message)],
         )
 
     return _run

@@ -16,6 +16,7 @@
           "status": {
             "enum": [
               "thinking",
+              "reading_documents",
               "searching",
               "writing"
             ],
@@ -68,15 +69,54 @@
         "type": "object"
       },
       "CitationRead": {
-        "description": "A source an answer cites. ``source_id`` matches the ``[S1]`` markers in\nthe message content; ``ordinal`` numbers the rendered source list.",
+        "description": "A source an answer cites. ``source_id`` matches the ``[S1]`` or ``[D1]``\nmarkers in the message content; ``ordinal`` numbers the rendered source list.\n\n``kind`` says which: a web page (``url`` and ``display_url`` set) or a\nchunk of one of the user's documents (``document_id`` and ``page`` set,\n``title`` is the filename, no URL).",
         "properties": {
           "display_url": {
-            "title": "Display Url",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Url"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "kind": {
+            "default": "web",
+            "enum": [
+              "web",
+              "document"
+            ],
+            "title": "Kind",
             "type": "string"
           },
           "ordinal": {
             "title": "Ordinal",
             "type": "integer"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
           },
           "published_at": {
             "anyOf": [
@@ -119,8 +159,15 @@
             "type": "string"
           },
           "url": {
-            "title": "Url",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
           }
         },
         "required": [
@@ -334,6 +381,46 @@
         ],
         "title": "DocumentStatus",
         "type": "string"
+      },
+      "DocumentsRetrievedEvent": {
+        "description": "Which of the conversation's documents the answer draws on (ADR-0015).\n\nNames and counts only, never document text: the passages reach the user\nas citations, and only the ones the answer actually cites.",
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievedDocumentRead"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "failed": {
+            "default": false,
+            "title": "Failed",
+            "type": "boolean"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "type": {
+            "const": "documents.retrieved",
+            "default": "documents.retrieved",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "run_id",
+          "documents"
+        ],
+        "title": "DocumentsRetrievedEvent",
+        "type": "object"
       },
       "ErrorBody": {
         "properties": {
@@ -744,6 +831,30 @@
           "password"
         ],
         "title": "ResetPasswordRequest",
+        "type": "object"
+      },
+      "RetrievedDocumentRead": {
+        "properties": {
+          "chunk_count": {
+            "title": "Chunk Count",
+            "type": "integer"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "filename",
+          "chunk_count"
+        ],
+        "title": "RetrievedDocumentRead",
         "type": "object"
       },
       "RunCancelledEvent": {
@@ -2241,6 +2352,7 @@
                     "mapping": {
                       "agent.status": "#/components/schemas/AgentStatusEvent",
                       "citation": "#/components/schemas/CitationEvent",
+                      "documents.retrieved": "#/components/schemas/DocumentsRetrievedEvent",
                       "message.completed": "#/components/schemas/MessageCompletedEvent",
                       "message.delta": "#/components/schemas/MessageDeltaEvent",
                       "run.cancelled": "#/components/schemas/RunCancelledEvent",
@@ -2257,6 +2369,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/AgentStatusEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DocumentsRetrievedEvent"
                     },
                     {
                       "$ref": "#/components/schemas/SearchStartedEvent"

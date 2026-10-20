@@ -111,15 +111,6 @@ export function DocumentChips({ attachments, running }: DocumentChipsProps) {
           </button>
         </div>
       ) : null}
-
-      {documents.length > 0 ? (
-        // Temporary, until retrieval ships (PLAN.md 11c): without it a user
-        // would reasonably expect the next answer to know what is in the file.
-        <p className="text-xs text-muted-foreground">
-          Documents are stored with this conversation. Answers will start using them in an upcoming
-          update.
-        </p>
-      ) : null}
     </div>
   )
 }

@@ -154,7 +154,27 @@ class RunStartedEvent(_RunEventBase):
 
 class AgentStatusEvent(_RunEventBase):
     type: Literal["agent.status"] = "agent.status"
-    status: Literal["thinking", "searching", "writing"]
+    status: Literal["thinking", "reading_documents", "searching", "writing"]
+
+
+class RetrievedDocumentRead(BaseModel):
+    document_id: uuid.UUID
+    filename: str
+    # How many passages of it the answer gets to read.
+    chunk_count: int
+
+
+class DocumentsRetrievedEvent(_RunEventBase):
+    """Which of the conversation's documents the answer draws on (ADR-0015).
+
+    Names and counts only, never document text: the passages reach the user
+    as citations, and only the ones the answer actually cites.
+    """
+
+    type: Literal["documents.retrieved"] = "documents.retrieved"
+    documents: list[RetrievedDocumentRead]
+    # The documents could not be searched for this answer at all.
+    failed: bool = False
 
 
 class SearchStartedEvent(_RunEventBase):
@@ -205,6 +225,7 @@ class RunCancelledEvent(_RunEventBase):
 RunEventModel = (
     RunStartedEvent
     | AgentStatusEvent
+    | DocumentsRetrievedEvent
     | SearchStartedEvent
     | SearchCompletedEvent
     | MessageDeltaEvent

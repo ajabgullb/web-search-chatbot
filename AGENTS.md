@@ -302,6 +302,7 @@ Set `Content-Type: text/event-stream`, disable proxy buffering, send heartbeat c
 - `agent.status` with safe statuses such as `thinking`, `searching`, and `writing`
 - `search.started` with a sanitized query
 - `search.completed` with source metadata, never raw page content
+- `documents.retrieved` with document names and passage counts, never document text (ADR-0015)
 - `message.delta` with text only
 - `citation`
 - `message.completed` with canonical message/run identifiers and usage

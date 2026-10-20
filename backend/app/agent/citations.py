@@ -17,9 +17,10 @@ from app.agent.state import Citation, Source
 
 logger = logging.getLogger(__name__)
 
-# Accepts [S1] and the [S1, S2] form models drift into. Bounded digits so a
+# Accepts [S1] and the [S1, S2] form models drift into, for web sources (S)
+# and document chunks (D), mixed as in [S1, D2]. Bounded digits so a
 # pathological string cannot produce a giant match.
-_MARKER = re.compile(r"\[\s*(S\d{1,3}(?:\s*,\s*S\d{1,3})*)\s*\]", re.IGNORECASE)
+_MARKER = re.compile(r"\[\s*([SD]\d{1,3}(?:\s*,\s*[SD]\d{1,3})*)\s*\]", re.IGNORECASE)
 
 # Below this an answer is a greeting, a refusal, or a clarifying question —
 # not a body of factual claims that citations were supposed to support.
@@ -37,6 +38,10 @@ def _make_citation(source: Source, ordinal: int) -> Citation:
         snippet=source["snippet"],
         published_at=source["published_at"],
         retrieved_at=source["retrieved_at"],
+        kind=source.get("kind", "web"),
+        document_id=source.get("document_id"),
+        chunk_id=source.get("chunk_id"),
+        page=source.get("page"),
     )
 
 
@@ -107,8 +112,10 @@ def strip_citation_markers(text: str) -> str:
 
 
 # A string that could still grow into a marker once more text arrives: "[",
-# "[S", "[S1", "[S1, ", "[S1, S2". Anything else starting with "[" is plain text.
-_PARTIAL_MARKER = re.compile(r"\[\s*(?:S\d{0,3}(?:\s*,\s*(?:S\d{0,3})?)*\s*)?\Z", re.IGNORECASE)
+# "[S", "[D1", "[S1, ", "[S1, D2". Anything else starting with "[" is plain text.
+_PARTIAL_MARKER = re.compile(
+    r"\[\s*(?:[SD]\d{0,3}(?:\s*,\s*(?:[SD]\d{0,3})?)*\s*)?\Z", re.IGNORECASE
+)
 # The longest plausible partial marker. Past this, "[" is text, not a citation
 # in progress, and holding it back would visibly stall the stream.
 _MAX_PENDING_CHARS = 48

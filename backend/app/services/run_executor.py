@@ -38,10 +38,11 @@ from datetime import UTC, datetime
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from app.agent.citations import strip_citation_markers
-from app.agent.context import AgentContext, AgentLimits
+from app.agent.context import AgentContext, AgentLimits, DocumentRetriever
 from app.agent.events import (
     AgentEvent,
     CitationAdded,
+    DocumentsRetrieved,
     SearchCompleted,
     SearchStarted,
     StatusChanged,
@@ -54,7 +55,7 @@ from app.core.logging import bind_log_context
 from app.core.run_lock import RunLock
 from app.core.run_signals import CancelRequest, RedisCancelSignal
 from app.db.session import Database
-from app.models.citation import Citation
+from app.models.citation import Citation, CitationKind
 from app.models.message import Message, MessageRole, MessageStatus
 from app.models.run import Run, RunStatus
 from app.providers.llm import LLMProvider
@@ -67,8 +68,10 @@ from app.schemas.message import CitationRead, MessageRead
 from app.schemas.runs import (
     AgentStatusEvent,
     CitationEvent,
+    DocumentsRetrievedEvent,
     MessageCompletedEvent,
     MessageDeltaEvent,
+    RetrievedDocumentRead,
     RunCancelledEvent,
     RunErrorRead,
     RunEventModel,
@@ -101,6 +104,7 @@ class AgentRuntime:
     search: SearchProvider
     limits: AgentLimits
     tracing: Tracing | None = None
+    documents: DocumentRetriever | None = None
 
 
 @dataclass(eq=False)
@@ -322,6 +326,16 @@ class RunManager:
                     telemetry.record_run(outcome_event.type, time.monotonic() - started)
                     return
 
+                # Read once, before the graph: whether there is anything to
+                # search decides the route, and the filenames inform the
+                # routing model.
+                ready = (
+                    await runtime.documents.ready_documents(
+                        user_id=run.user_id, conversation_id=run.conversation_id
+                    )
+                    if runtime.documents is not None
+                    else []
+                )
                 context = AgentContext(
                     user_id=run.user_id,
                     conversation_id=run.conversation_id,
@@ -331,6 +345,8 @@ class RunManager:
                     limits=runtime.limits,
                     request_id=request_id,
                     trace=runtime.tracing.for_run(run_id=run.id) if runtime.tracing else None,
+                    documents=runtime.documents,
+                    ready_documents=tuple(ready),
                 )
                 result = await self._drive(handle, runtime, context, history)
             except asyncio.CancelledError:
@@ -449,6 +465,20 @@ class RunManager:
         match event:
             case StatusChanged(status=status):
                 return AgentStatusEvent(sequence=sequence, run_id=run_id, status=status)
+            case DocumentsRetrieved(documents=documents, failed=failed):
+                return DocumentsRetrievedEvent(
+                    sequence=sequence,
+                    run_id=run_id,
+                    documents=[
+                        RetrievedDocumentRead(
+                            document_id=uuid.UUID(document.document_id),
+                            filename=document.filename,
+                            chunk_count=document.chunks,
+                        )
+                        for document in documents
+                    ],
+                    failed=failed,
+                )
             case SearchStarted(query=query):
                 return SearchStartedEvent(sequence=sequence, run_id=run_id, query=query)
             case SearchCompleted(query=query, sources=sources, failed=failed):
@@ -537,8 +567,12 @@ class RunManager:
                     message_id=message.id,
                     ordinal=citation["ordinal"],
                     source_id=citation["source_id"],
+                    kind=CitationKind(citation.get("kind", "web")),
                     url=citation["url"],
                     display_url=citation["display_url"],
+                    document_id=_uuid_or_none(citation.get("document_id")),
+                    document_chunk_id=_uuid_or_none(citation.get("chunk_id")),
+                    page=citation.get("page"),
                     title=citation["title"],
                     publisher=citation["publisher"],
                     snippet=citation["snippet"],
@@ -611,6 +645,11 @@ class RunManager:
             run_id=run_id,
             error=RunErrorRead(code=code, message=describe_run_error(code), retryable=True),
         )
+
+
+def _uuid_or_none(value: str | None) -> uuid.UUID | None:
+    """Graph state holds ids as strings, to stay JSON-native in checkpoints."""
+    return uuid.UUID(value) if value else None
 
 
 def _to_langchain(message: Message) -> AnyMessage:

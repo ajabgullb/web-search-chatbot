@@ -220,6 +220,7 @@ def get_agent_runtime(request: Request) -> AgentRuntime:
         search=state.search_provider,
         limits=state.agent_limits,
         tracing=state.tracing,
+        documents=state.document_retriever,
     )
 
 

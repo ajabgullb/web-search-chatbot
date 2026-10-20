@@ -18,7 +18,7 @@ from typing import Literal
 
 from app.agent.state import Citation, Source
 
-AgentStatus = Literal["thinking", "searching", "writing"]
+AgentStatus = Literal["thinking", "reading_documents", "searching", "writing"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +43,23 @@ class SearchCompleted:
 
 
 @dataclass(frozen=True, slots=True)
+class RetrievedDocument:
+    document_id: str
+    filename: str
+    # How many of its chunks the answer gets to read.
+    chunks: int
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentsRetrieved:
+    """Which documents the answer will draw on. Names and counts, never text."""
+
+    documents: tuple[RetrievedDocument, ...]
+    # The question could not be searched against the documents at all.
+    failed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class TextDelta:
     text: str
 
@@ -54,4 +71,6 @@ class CitationAdded:
     citation: Citation
 
 
-AgentEvent = StatusChanged | SearchStarted | SearchCompleted | TextDelta | CitationAdded
+AgentEvent = (
+    StatusChanged | DocumentsRetrieved | SearchStarted | SearchCompleted | TextDelta | CitationAdded
+)

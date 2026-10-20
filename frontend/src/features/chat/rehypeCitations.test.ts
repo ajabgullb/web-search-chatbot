@@ -37,6 +37,14 @@ describe('rehypeCitations', () => {
     )
   })
 
+  it('recognises document markers as well as web ones', () => {
+    const tree = paragraph({ type: 'text', value: 'Grew [D1] and fell [S2]; [X3] is text.' })
+    rehypeCitations()(tree)
+
+    const labels = JSON.stringify(tree).match(/"dataCitation":"([A-Z]\d+)"/g)
+    expect(labels).toEqual(['"dataCitation":"D1"', '"dataCitation":"S2"'])
+  })
+
   it('leaves code, preformatted text, and link text alone', () => {
     for (const tagName of ['code', 'pre', 'a']) {
       const tree = paragraph({

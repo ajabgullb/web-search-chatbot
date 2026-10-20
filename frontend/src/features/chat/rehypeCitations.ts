@@ -1,5 +1,6 @@
 /**
- * Turns `[S1]` citation markers in rendered Markdown into citation elements.
+ * Turns `[S1]` (web) and `[D1]` (document) citation markers in rendered
+ * Markdown into citation elements.
  *
  * Runs on the HTML tree *after* sanitizing, so the elements it creates are our
  * own and are never subject to — or a way around — the sanitizer. Text inside
@@ -13,7 +14,7 @@
 
 import type { Element, ElementContent, Root, RootContent } from 'hast'
 
-const MARKER = /\[(S\d{1,3})\]/g
+const MARKER = /\[([SD]\d{1,3})\]/g
 const OPAQUE_TAGS = new Set(['code', 'pre', 'a'])
 
 function splitText(value: string): ElementContent[] {

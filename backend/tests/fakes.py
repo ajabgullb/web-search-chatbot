@@ -6,12 +6,15 @@ import asyncio
 import hashlib
 import math
 import re
+import uuid
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
 
 from langchain_core.messages import AnyMessage
 
+from app.agent.context import AgentLimits
 from app.agent.routing import SearchDecision
+from app.agent.tools.documents import ChunkCandidate, DocumentSearch, RankedChunk
 from app.core.config import EMBEDDING_VECTOR_DIMENSIONS
 from app.providers.email import EmailPayload
 from app.providers.embeddings import EmbeddingBatch, validate_inputs
@@ -258,3 +261,64 @@ class FakeEmbeddings:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+def chunk(
+    content: str,
+    *,
+    filename: str = "report.pdf",
+    page: int = 1,
+    similarity: float = 0.6,
+    document_id: uuid.UUID | None = None,
+) -> ChunkCandidate:
+    """A retrieved chunk without restating every field."""
+    return ChunkCandidate(
+        chunk_id=uuid.uuid4(),
+        # One id per filename, the same on every run.
+        document_id=document_id or uuid.uuid5(uuid.NAMESPACE_URL, f"document:{filename}"),
+        filename=filename,
+        page=page,
+        content=content,
+        similarity=similarity,
+    )
+
+
+class FakeDocumentRetriever:
+    """Scripted document search for graph tests and evals.
+
+    Returns ``chunks`` in order for every question, or fails when ``failed``.
+    Selection rules are tested on their own (``test_document_selection``), so
+    this skips them: what it returns is what the graph gets.
+    """
+
+    def __init__(
+        self,
+        *,
+        chunks: list[ChunkCandidate] | None = None,
+        filenames: tuple[str, ...] = ("report.pdf",),
+        failed: bool = False,
+    ) -> None:
+        self.chunks = chunks or []
+        self.filenames = filenames
+        self._failed = failed
+        self.queries: list[str] = []
+
+    async def ready_documents(self, *, user_id: uuid.UUID, conversation_id: uuid.UUID) -> list[str]:
+        return list(self.filenames)
+
+    async def search(
+        self,
+        *,
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        query: str,
+        limits: AgentLimits,
+    ) -> DocumentSearch:
+        self.queries.append(query)
+        if self._failed:
+            return DocumentSearch(failed=True)
+        ranked = [
+            RankedChunk(candidate, 1.0 / (index + 1), keyword_match=False)
+            for index, candidate in enumerate(self.chunks)
+        ]
+        return DocumentSearch(chunks=ranked)

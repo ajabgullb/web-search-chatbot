@@ -24,12 +24,12 @@ from app.agent.prompts import ANSWER_DIRECT_SYSTEM, SEARCH_DECISION_SYSTEM, SYNT
 from app.agent.routing import SearchDecision
 from app.providers.llm import LLMChunk, LLMProvider, StructuredT
 from app.providers.search import SearchHit, SearchPermanentError, SearchProvider
-from tests.fakes import FakeLLM, FakeSearchProvider
+from tests.fakes import FakeDocumentRetriever, FakeLLM, FakeSearchProvider, chunk
 
 DATASET_PATH = Path(__file__).with_name("dataset.json")
 Subset = Literal["ci", "live"]
 
-_MARKER = re.compile(r"\[(S\d+)\]")
+_MARKER = re.compile(r"\[([SD]\d+)\]")
 
 
 @dataclass(frozen=True)
@@ -119,6 +119,28 @@ def scripted_search(case: dict[str, Any]) -> SearchProvider:
     return FakeSearchProvider(default=hits)
 
 
+def scripted_documents(case: dict[str, Any]) -> FakeDocumentRetriever | None:
+    """The case's documents, if it has any. Retrieval itself is scripted in
+    both subsets: what is measured here is what the agent does with what it
+    is given. Retrieval quality is measured against a real database and real
+    embeddings by ``evals/retrieval.py``."""
+    script = case["script"]
+    if "documents" not in script and not script.get("documents_error"):
+        return None
+    return FakeDocumentRetriever(
+        chunks=[
+            chunk(
+                item["content"],
+                filename=item.get("filename", "report.pdf"),
+                page=item.get("page", 1),
+            )
+            for item in script.get("documents", [])
+        ],
+        filenames=tuple(script.get("filenames", ["report.pdf"])),
+        failed=bool(script.get("documents_error")),
+    )
+
+
 def history_for(case: dict[str, Any]) -> list[AnyMessage]:
     turns: list[AnyMessage] = []
     for role, content in case.get("history", []):
@@ -181,6 +203,7 @@ async def run_case(
 ) -> CaseOutcome:
     recording_llm = RecordingLLM(llm)
     recording_search = RecordingSearch(search)
+    documents = scripted_documents(case)
     context = AgentContext(
         user_id=uuid.uuid4(),
         conversation_id=uuid.uuid4(),
@@ -189,6 +212,8 @@ async def run_case(
         search=recording_search,
         limits=limits,
         request_id=f"eval-{case['id']}",
+        documents=documents,
+        ready_documents=documents.filenames if documents is not None else (),
     )
     started = time.perf_counter()
     result = await run_agent(build_graph(), context=context, history=history_for(case))
@@ -202,7 +227,7 @@ async def run_case(
         queries=list(recording_search.queries),
         latency_seconds=latency,
     )
-    _evaluate(case, outcome, recording_llm, recording_search, subset)
+    _evaluate(case, outcome, recording_llm, recording_search, documents, subset)
     return outcome
 
 
@@ -211,6 +236,7 @@ def _evaluate(
     outcome: CaseOutcome,
     llm: RecordingLLM,
     search: RecordingSearch,
+    documents: FakeDocumentRetriever | None,
     subset: Subset,
 ) -> None:
     expect = case["expect"]
@@ -230,12 +256,20 @@ def _evaluate(
             by_heuristic = result.search_rationale.startswith("heuristic:")
             checks.append(Check("decided_by_heuristic", by_heuristic, result.search_rationale))
 
-    # Citation validity: every citation names a source this run retrieved.
+    # Citation validity: every citation names a source this run retrieved: a
+    # page the search returned, or a chunk the document search returned.
     source_ids = {source["source_id"] for source in result.sources}
+    chunk_ids = {str(c.chunk_id) for c in documents.chunks} if documents is not None else set()
+
+    def retrieved(citation: Any) -> bool:
+        if citation.get("kind") == "document":
+            return citation.get("chunk_id") in chunk_ids
+        return citation["url"] in search.returned_urls
+
     valid = [
         citation
         for citation in result.citations
-        if citation["source_id"] in source_ids and citation["url"] in search.returned_urls
+        if citation["source_id"] in source_ids and retrieved(citation)
     ]
     outcome.citations_valid = len(valid)
     checks.append(
@@ -262,6 +296,29 @@ def _evaluate(
         )
     if expect.get("notice"):
         checks.append(Check("notice_shown", bool(result.notice), result.notice[:60]))
+    if "documents" in expect:
+        checks.append(
+            Check(
+                "documents_read",
+                result.read_documents is expect["documents"],
+                f"read_documents={result.read_documents}",
+            )
+        )
+    if "citation_kinds" in expect:
+        kinds = [citation.get("kind", "web") for citation in result.citations]
+        checks.append(Check("citation_kinds", kinds == expect["citation_kinds"], str(kinds)))
+    # CI only: the scripted model gives no rewrite, so the fallback query is
+    # exactly predictable. A real model rewrites follow-ups (better), and the
+    # live judge's rubric checks the understanding instead.
+    if "document_queries_exactly" in expect and subset == "ci":
+        asked = documents.queries if documents is not None else []
+        checks.append(
+            Check(
+                "document_queries_exactly",
+                asked == expect["document_queries_exactly"],
+                str(asked),
+            )
+        )
     if "queries_exactly" in expect:
         checks.append(
             Check(

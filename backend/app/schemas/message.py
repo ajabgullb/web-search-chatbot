@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -24,15 +25,22 @@ class PublicMessageRole(StrEnum):
 
 
 class CitationRead(BaseModel):
-    """A source an answer cites. ``source_id`` matches the ``[S1]`` markers in
-    the message content; ``ordinal`` numbers the rendered source list."""
+    """A source an answer cites. ``source_id`` matches the ``[S1]`` or ``[D1]``
+    markers in the message content; ``ordinal`` numbers the rendered source list.
+
+    ``kind`` says which: a web page (``url`` and ``display_url`` set) or a
+    chunk of one of the user's documents (``document_id`` and ``page`` set,
+    ``title`` is the filename, no URL)."""
 
     model_config = ConfigDict(from_attributes=True)
 
     ordinal: int
     source_id: str
-    url: str
-    display_url: str
+    kind: Literal["web", "document"] = "web"
+    url: str | None
+    display_url: str | None
+    document_id: uuid.UUID | None = None
+    page: int | None = None
     title: str
     publisher: str | None
     snippet: str

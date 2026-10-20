@@ -67,6 +67,37 @@ uv run python -m evals.run --subset live
 Each run writes a JSON report to `evals/reports/` (git-ignored) with scores
 and failed checks. It holds no answer text.
 
+## Documents
+
+Seven cases cover the conversation's PDFs (ADR-0015): answer in the
+document, answer absent, document and web disagree, prompt injection inside a
+document, a follow-up that needs its query rewritten, a document-search
+outage, and a near miss (a passage that sounds related but does not answer).
+Retrieval is scripted in both subsets (`script.documents`), so these measure
+what the agent does with what it is given: whether it reads the documents,
+cites them with `D` labels, says when they do not cover a question, and
+ignores instructions inside them.
+
+Two properties need a real database instead, and are tested there:
+
+- **Another user's document is never retrieved.** A property of the SQL, so
+  `tests/integration/test_retrieval.py` checks it, and fails if the
+  `user_id` condition is removed.
+- **Retrieval quality and the relevance floor.** Measured live:
+
+```bash
+cd backend
+uv run python -m evals.retrieval --database-url postgresql+asyncpg://app:app@localhost:5432/scratch
+```
+
+It embeds the passages and questions of `retrieval_dataset.json` with the
+real model (about 3,000 tokens, roughly $0.00006), runs the real hybrid search
+against the scratch database, and sweeps `DOCUMENT_MIN_SIMILARITY` from 0.10
+to 0.50, reporting recall (answerable questions whose passage is chosen) and
+leak (unanswerable questions that still get a chunk). The database must be
+migrated; the rows it writes are deleted again. Rerun it before changing the
+embedding model or the floor. The 2026-10-20 results are in ADR-0015.
+
 ## Changing the dataset
 
 Bump `version` whenever a case changes, so reports from different datasets
