@@ -7,10 +7,12 @@
 
 import { request } from '@/api/client'
 import type {
+  ChatDocument,
   Conversation,
   ConversationDetail,
   ConversationPage,
   ConversationUpdate,
+  DocumentList,
   MessagePage,
   Run,
 } from '@/api/types'
@@ -60,4 +62,27 @@ export function getRun(runId: string): Promise<Run> {
 
 export function cancelRun(runId: string): Promise<Run> {
   return request<Run>(`/runs/${runId}/cancel`, { method: 'POST' })
+}
+
+export function listDocuments(conversationId: string): Promise<DocumentList> {
+  return request<DocumentList>(`/conversations/${conversationId}/documents`)
+}
+
+/**
+ * Upload a PDF. Resolves with `status: "processing"`; the document becomes
+ * `ready` (or `failed`) in the background, so callers poll the list.
+ */
+export function uploadDocument(conversationId: string, file: File): Promise<ChatDocument> {
+  const form = new FormData()
+  form.append('file', file, file.name)
+  return request<ChatDocument>(`/conversations/${conversationId}/documents`, {
+    method: 'POST',
+    form,
+  })
+}
+
+export function deleteDocument(conversationId: string, documentId: string): Promise<void> {
+  return request<void>(`/conversations/${conversationId}/documents/${documentId}`, {
+    method: 'DELETE',
+  })
 }

@@ -7,9 +7,9 @@
  * Shift+Enter still work normally.
  */
 
-import { SendHorizonal, Square } from 'lucide-react'
+import { Paperclip, SendHorizonal, Square } from 'lucide-react'
 import { useRef, useState } from 'react'
-import type { FormEvent, KeyboardEvent } from 'react'
+import type { ChangeEvent, FormEvent, KeyboardEvent, ReactNode } from 'react'
 
 import { Button } from '@/components/ui/Button'
 import { COUNTER_VISIBLE_FROM, MAX_MESSAGE_CHARACTERS } from '@/features/chat/constants'
@@ -26,11 +26,40 @@ interface ComposerProps {
   running?: boolean
   onStop?: () => void
   stopping?: boolean
+  /**
+   * Called with a file the user picked. Without it there is no attach button.
+   * Attaching does not send a message: the file belongs to the conversation.
+   */
+  onAttach?: (file: File) => void
+  /** True while a file is uploading; one at a time. */
+  attaching?: boolean
+  /** File types the picker offers, as for `<input accept>`. */
+  accept?: string
+  /** Rendered inside the box, above the text: what is attached. */
+  attachments?: ReactNode
 }
 
-export function Composer({ onSubmit, running = false, onStop, stopping = false }: ComposerProps) {
+export function Composer({
+  onSubmit,
+  running = false,
+  onStop,
+  stopping = false,
+  onAttach,
+  attaching = false,
+  accept,
+  attachments,
+}: ComposerProps) {
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  function handleFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    // Cleared, so picking the same file again (after removing it) still fires
+    // a change event.
+    event.target.value = ''
+    if (file && onAttach) onAttach(file)
+  }
 
   const trimmed = value.trim()
   const tooLong = value.length > MAX_MESSAGE_CHARACTERS
@@ -61,44 +90,73 @@ export function Composer({ onSubmit, running = false, onStop, stopping = false }
   return (
     <form onSubmit={handleSubmit} className="border-t border-border bg-background p-4">
       <div className="mx-auto flex max-w-3xl flex-col gap-2">
-        <div className="flex items-end gap-2 rounded-lg border border-input bg-background p-2 focus-within:ring-2 focus-within:ring-ring">
-          <label htmlFor="composer" className="sr-only">
-            Message
-          </label>
-          <textarea
-            id="composer"
-            ref={textareaRef}
-            rows={1}
-            value={value}
-            onChange={(event) => {
-              setValue(event.target.value)
-              // Grow with the content up to a ceiling, then scroll.
-              const element = event.target
-              element.style.height = 'auto'
-              element.style.height = `${Math.min(element.scrollHeight, 200)}px`
-            }}
-            onKeyDown={handleKeyDown}
-            placeholder={running ? 'Write your next message…' : 'Ask anything…'}
-            aria-describedby="composer-help"
-            aria-invalid={tooLong || undefined}
-            className="max-h-50 min-h-9 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none"
-          />
-          {running ? (
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              onClick={onStop}
-              disabled={stopping || !onStop}
-              aria-label={stopping ? 'Stopping' : 'Stop answering'}
-            >
-              <Square className="size-4 fill-current" aria-hidden />
-            </Button>
-          ) : (
-            <Button type="submit" size="icon" disabled={!canSend} aria-label="Send message">
-              <SendHorizonal className="size-4" aria-hidden />
-            </Button>
-          )}
+        <div className="flex flex-col gap-2 rounded-lg border border-input bg-background p-2 focus-within:ring-2 focus-within:ring-ring">
+          {attachments}
+          <div className="flex items-end gap-2">
+            {onAttach ? (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={accept}
+                  onChange={handleFile}
+                  // Hidden, and out of the tab order: the button is the control.
+                  hidden
+                  tabIndex={-1}
+                  data-testid="composer-file-input"
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={attaching}
+                  aria-label={attaching ? 'Uploading document' : 'Attach a PDF'}
+                  title="Attach a PDF"
+                  className="shrink-0 text-muted-foreground"
+                >
+                  <Paperclip className="size-4" aria-hidden />
+                </Button>
+              </>
+            ) : null}
+            <label htmlFor="composer" className="sr-only">
+              Message
+            </label>
+            <textarea
+              id="composer"
+              ref={textareaRef}
+              rows={1}
+              value={value}
+              onChange={(event) => {
+                setValue(event.target.value)
+                // Grow with the content up to a ceiling, then scroll.
+                const element = event.target
+                element.style.height = 'auto'
+                element.style.height = `${Math.min(element.scrollHeight, 200)}px`
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder={running ? 'Write your next message…' : 'Ask anything…'}
+              aria-describedby="composer-help"
+              aria-invalid={tooLong || undefined}
+              className="max-h-50 min-h-9 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none"
+            />
+            {running ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                onClick={onStop}
+                disabled={stopping || !onStop}
+                aria-label={stopping ? 'Stopping' : 'Stop answering'}
+              >
+                <Square className="size-4 fill-current" aria-hidden />
+              </Button>
+            ) : (
+              <Button type="submit" size="icon" disabled={!canSend} aria-label="Send message">
+                <SendHorizonal className="size-4" aria-hidden />
+              </Button>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center justify-between gap-4 text-xs text-muted-foreground">

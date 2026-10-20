@@ -22,6 +22,16 @@ export type ApiErrorCode =
   | 'idempotency_key_reused'
   | 'message_empty'
   | 'message_too_long'
+  | 'document_not_found'
+  | 'document_limit_reached'
+  | 'embedding_quota_exceeded'
+  | 'pdf_invalid'
+  | 'pdf_encrypted'
+  | 'pdf_no_text'
+  | 'pdf_too_large'
+  | 'pdf_too_complex'
+  | 'payload_too_large'
+  | 'service_unavailable'
 
 /**
  * A failed API call, carrying the server's error envelope.

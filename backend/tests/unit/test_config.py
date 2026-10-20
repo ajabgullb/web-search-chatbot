@@ -176,3 +176,22 @@ class TestClientMirroredLimits:
         assert match is not None, "MAX_MESSAGE_CHARACTERS is no longer declared"
 
         assert int(match.group(1).replace("_", "")) == Settings().max_user_message_chars
+
+    def test_the_upload_size_limit_matches_the_setting(self) -> None:
+        """The attach button refuses oversized PDFs before sending them; a
+        drifting copy would refuse files the API accepts, or wave through
+        files it then rejects after a 10 MB upload."""
+        constants = (
+            Path(__file__).resolve().parents[3]
+            / "frontend"
+            / "src"
+            / "features"
+            / "chat"
+            / "constants.ts"
+        )
+        source = constants.read_text(encoding="utf-8")
+
+        match = re.search(r"MAX_DOCUMENT_BYTES\s*=\s*([\d_]+)", source)
+        assert match is not None, "MAX_DOCUMENT_BYTES is no longer declared"
+
+        assert int(match.group(1).replace("_", "")) == Settings().max_document_bytes

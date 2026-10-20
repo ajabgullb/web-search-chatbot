@@ -34,6 +34,10 @@ export type Run = Schemas['RunRead']
 export type RunError = Schemas['RunErrorRead']
 export type RunCreate = Schemas['RunCreate']
 
+export type ChatDocument = Schemas['DocumentRead']
+export type DocumentList = Schemas['DocumentList']
+export type DocumentStatus = ChatDocument['status']
+
 /** Every event the run stream can carry, discriminated on `type`. */
 export type RunEvent =
   | Schemas['RunStartedEvent']
