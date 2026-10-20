@@ -362,3 +362,70 @@ make generate-client && git diff --exit-code frontend/src/api/generated
 # clean-clone rehearsal
 git clone <repo> /tmp/rehearsal && cd /tmp/rehearsal && cp .env.example .env && docker compose up --build
 ```
+
+---
+
+## Phase 11 — Chat-scoped PDF retrieval (v2)
+
+**Goal:** Let a user upload PDFs to one conversation and get answers grounded in them, cited by filename and page, without weakening ownership, privacy, or the run budgets. The design and every default are in [ADR-0015](docs/adr/0015-chat-scoped-pdf-retrieval.md). Phase 10 (abuse controls, trusted client IPs, backups, capacity) is recorded in ADR-0013 and ADR-0014.
+
+Each slice below is shippable and leaves the repository runnable.
+
+### 11a — Storage and embedding foundation
+
+- PostgreSQL image `pgvector/pgvector:pg16` (exact version tag, at least 0.8.2) in `compose.yaml`, `compose.prod.yaml`, and both CI service blocks. Migration notes for existing volumes (dump and restore; see ADR-0015 Consequences).
+- Migration: `CREATE EXTENSION vector`; `documents` and `document_chunks` tables. Downgrade path included. The migration refuses a data volume reattached from the Alpine image (collation guard in `app/db/migrations_helpers.py`).
+- `EmbeddingProvider` protocol, an `AsyncOpenAI` implementation with SDK retries off and transient/permanent classification (quota-exhausted 429s are permanent), and a deterministic hashed bag-of-words fake.
+- Typed settings for the embedding provider. `EMBEDDING_DIMENSIONS` must equal the vector column width.
+- Operator procedure for moving existing data to the new image (`docs/deployment.md` §5), rehearsed against a real development database.
+
+Deferred from the original 11a list: the `citations` changes move to 11c, the first slice that produces a document citation, so the public schema changes once. The readiness check for the extension was dropped (ADR-0015, "Observability and readiness").
+
+**Done when:** migrations go up and down on an empty database; the fake and the real provider's error mapping are unit-tested with an `httpx2.MockTransport` under the real SDK; the collation guard is proven through a real `alembic upgrade`; CI is green on the new image.
+
+### 11b — Upload and ingestion
+
+- Embedding provider built in the lifespan and closed on shutdown; production refuses to start without `EMBEDDING_API_KEY` (added to `compose.prod.yaml` and `.env.production.example`).
+- Document limits in typed settings (`MAX_DOCUMENT_BYTES`, pages, characters, chunks, documents per conversation).
+- `POST/GET/DELETE /conversations/{id}/documents[/{document_id}]` with ownership at the SQL boundary, `404` for guessed IDs, verified email required, per-user upload rate limit, and per-conversation document cap.
+- Upload-only body limit (API middleware and nginx), `%PDF-` magic-byte check, streamed size cap.
+- `pypdf` parsing in a bounded process pool with timeout and memory limit; `pdf_invalid`, `pdf_encrypted`, `pdf_no_text`, `pdf_too_large`.
+- Page-bounded chunking with overlap; SHA-256 duplicate detection.
+- In-process ingestion manager: `SKIP LOCKED` lease, batched embedding, attempt limit, startup and periodic sweep, daily embedding-token quota.
+- Document deletion and conversation deletion hard-delete documents and call `checkpointer.adelete_thread`. `409` while a run is active.
+
+**Done when:** integration tests cover cross-user access, duplicate upload, each rejection code, a crash between chunking and embedding (sweep resumes it), quota exhaustion, and checkpoint removal on delete; a hostile-PDF test proves a hung parse is killed.
+
+### 11c — Retrieval in the agent
+
+- `decide_search` → `decide_retrieval` with `use_documents`; `document_query` added to the structured decision.
+- `retrieve_documents` node: query embedding under timeout and one transient retry, hybrid vector plus full-text ranking fused with RRF, relevance floor, top-k and character budget, `D1…` labels.
+- Migration: `citations` gains `kind`, `document_chunk_id` (`ON DELETE CASCADE`), `page`, and nullable `url`/`display_url` with a check constraint that web citations keep both.
+- Citation validator and stream filter accept `D` labels; document citations persisted with chunk and page.
+- Prompts fence document text as untrusted, add a document-versus-web disagreement rule; bump `PROMPT_VERSION`.
+- SSE: `reading_documents` status, `documents.retrieved` (metadata only), `kind`/`page`/`document_id` on `citation`.
+- Eval cases from ADR-0015 added to `backend/evals/dataset.json`, with retrieval recall@k reported. The relevance floor default is set from these results.
+
+**Done when:** graph tests cover every routing combination; no path loops; an ownership test proves user B never retrieves user A's chunk with an identical question; the `ci` eval subset passes its gates.
+
+### 11d — Frontend
+
+- PDF upload control in the composer (`accept="application/pdf"`, client-side size check mirrored from the server limit), document chips with status, polling while `processing`, remove action, accessible error states.
+- Document source cards (filename and page, no external link); `rehypeCitations.ts` accepts `D` labels.
+- OpenAPI and the generated client regenerated and committed.
+
+**Done when:** Vitest covers upload states, polling stop conditions, and document citations; Playwright uploads a fixture PDF with fake providers, asks about it, sees a `[D1]` citation, reloads, and deletes the document.
+
+### 11e — Hardening and docs
+
+- Metrics from ADR-0015 (ingestion, embedding, retrieval, empty-retrieval rate).
+- `security.md`: hostile files, document prompt injection, third-party embedding, deletion and backup retention. `architecture.md` and `api.md` updated.
+- Load test: upload plus concurrent streams, confirming parsing does not stall the event loop.
+
+**Verify**
+
+```bash
+make lint && make typecheck && make test && make e2e
+uv run python -m evals.run --subset ci
+make generate-client && git diff --exit-code frontend/src/api/generated
+```
