@@ -20,10 +20,12 @@ The repository is a monorepo with `backend/` and `frontend/` under one root. Fol
 8. Refreshing the page preserves conversations and completed messages.
 9. Users can stop an in-progress response and retry a failed or stopped response.
 10. Users can never read, alter, or run another user's conversations.
+11. (v2, [ADR-0015](docs/adr/0015-chat-scoped-pdf-retrieval.md)) Users can upload PDF documents to a conversation, see their processing status, and remove them. Answers in that conversation can draw on those documents and cite them by filename and page. A document belongs to exactly one conversation and is never visible from any other.
 
-### Explicit non-goals for v1
+### Explicit non-goals
 
-- No multi-agent supervisor/team, autonomous background research, arbitrary code execution, file upload, RAG over private documents, voice, image generation, billing, organization tenancy, social login, admin dashboard, or native mobile app.
+- No multi-agent supervisor/team, autonomous background research, arbitrary code execution, voice, image generation, billing, organization tenancy, social login, admin dashboard, or native mobile app.
+- Document upload is limited to the scope of ADR-0015: PDF only, with no OCR, no other file formats, no storage of the original file, and no document library shared across conversations.
 - No long-term semantic user memory in v1. Conversation state is thread-scoped only.
 - No WebSocket requirement. Use Server-Sent Events (SSE) over a streaming HTTP response.
 - Do not expose private chain-of-thought, hidden prompts, raw model reasoning tokens, API keys, or unfiltered tool payloads. Return short user-facing progress summaries only.
@@ -42,7 +44,8 @@ The repository is a monorepo with `backend/` and `frontend/` under one root. Fol
 
 ### Supporting services
 
-- PostgreSQL is required and is the source of truth for application data and LangGraph checkpoints.
+- PostgreSQL is required and is the source of truth for application data and LangGraph checkpoints. It runs with the pgvector extension, which stores document-chunk embeddings next to the rows they belong to. There is no separate vector database.
+- Embeddings come from OpenAI's `text-embedding-3-small` through an `EmbeddingProvider` interface, configured separately from the chat model.
 - Redis is optional in local development but required in the production profile for distributed rate limiting and short-lived coordination/cancellation flags. The API must fail clearly if production is configured without Redis.
 - LLM and search providers must sit behind small interfaces. The first implementation may use one OpenAI-compatible chat model and Tavily search, but provider-specific objects must not leak into route handlers or domain models.
 - Observability must work locally without a paid service: structured JSON logs and Prometheus-compatible metrics. LangSmith tracing is optional and enabled only through environment configuration.
@@ -161,7 +164,9 @@ Use UUID primary keys, UTC timezone-aware timestamps, foreign keys, useful index
 - `conversations`: `id`, `user_id`, `title`, `created_at`, `updated_at`, `deleted_at` for soft deletion.
 - `messages`: `id`, `conversation_id`, `role` (`user`, `assistant`, `system`, `tool` internally), normalized content, status, sequence number, model name when applicable, token/latency metadata, and timestamps. Public APIs normally expose only user and assistant messages.
 - `runs`: `id`, `conversation_id`, `user_message_id`, optional `assistant_message_id`, status (`queued`, `running`, `completed`, `failed`, `cancelled`), error code, started/completed timestamps, provider/model, search count, and usage metadata.
-- `citations`: `id`, `message_id`, stable ordinal, canonical URL, title, optional publisher, snippet, retrieved timestamp, and optional published timestamp.
+- `citations`: `id`, `message_id`, stable ordinal, `kind` (`web` or `document`), canonical URL (required for web citations), title, optional publisher, snippet, retrieved timestamp, optional published timestamp, and for document citations the chunk reference and page.
+- `documents`: `id`, `user_id`, `conversation_id`, sanitized filename, content SHA-256, size, page/char/chunk counts, status (`processing`, `ready`, `failed`), error code, embedding model and dimensions, embedding token count, ingestion lease, and timestamps. Hard-deleted, never soft-deleted.
+- `document_chunks`: `id`, `document_id`, denormalized `user_id` and `conversation_id`, ordinal, page, text, generated full-text `tsvector`, and a nullable embedding vector.
 
 Add unique `(conversation_id, sequence_number)` and indexes for conversation listing, message pagination, active sessions, and run status. All ownership queries must constrain by `user_id` at the database query boundary. A guessed UUID must produce `404`, not reveal whether another user's object exists.
 
@@ -207,6 +212,8 @@ Implement a small explicit graph:
 ```text
 START -> decide_search -> [web_search -> synthesize | answer_direct] -> finalize -> END
 ```
+
+With documents (ADR-0015), `decide_search` becomes `decide_retrieval` and an optional `retrieve_documents` node runs before the optional `web_search`. The graph stays acyclic. Document retrieval is constrained by user and conversation in SQL, ranks by hybrid vector and full-text search, discards chunks below a relevance floor, and labels chunks `D1…` next to web sources `S1…`. Document text is untrusted exactly like web text.
 
 - `decide_search`: use deterministic heuristics first and structured model output when needed. Search for fresh, niche, externally verifiable, source-requesting, or uncertain questions. Do not search for ordinary greetings, rewriting supplied text, or questions fully answerable from the visible conversation.
 - `web_search`: execute validated queries through the search-provider interface, normalize/deduplicate URLs, cap result count, enforce timeout, and never return raw provider types.
@@ -258,6 +265,10 @@ All endpoints live under `/api/v1`. Use Pydantic request and response models; ne
 - `DELETE /conversations/{conversation_id}`
 - `GET /conversations/{conversation_id}/messages?before=&limit=`
 - `POST /conversations/{conversation_id}/runs` — accepts the user message and streams SSE
+- `POST /conversations/{conversation_id}/documents` — multipart PDF upload, returns `202`
+- `GET /conversations/{conversation_id}/documents` — capped list, not paginated
+- `GET /conversations/{conversation_id}/documents/{document_id}`
+- `DELETE /conversations/{conversation_id}/documents/{document_id}`
 - `POST /runs/{run_id}/cancel`
 - `GET /runs/{run_id}` — recovery/polling endpoint
 - `GET /health/live`
@@ -357,6 +368,12 @@ SEARCH_API_KEY=
 MAX_SEARCHES_PER_RUN=3
 MAX_RESULTS_PER_SEARCH=5
 RUN_TIMEOUT_SECONDS=90
+EMBEDDING_API_KEY=
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSIONS=1536
+MAX_DOCUMENT_BYTES=10485760
+MAX_DOCUMENTS_PER_CONVERSATION=5
 LANGSMITH_TRACING=false
 LANGSMITH_API_KEY=
 LOG_LEVEL=INFO
@@ -388,7 +405,7 @@ Production startup must reject default/weak secrets, wildcard credentialed CORS,
 
 ### Agent evaluations
 
-Maintain a small versioned dataset in `backend/evals/` containing: no-search questions, freshness questions, multi-source questions, conflicting-source questions, prompt injection in retrieved content, search outage, empty results, malformed citation, and conversation follow-up. Measure at minimum search-decision accuracy, citation validity/precision, task-answer rubric score, unsupported-claim rate, latency, and approximate cost. Run a fast deterministic subset in CI; document how to run model-based evaluations separately.
+Maintain a small versioned dataset in `backend/evals/` containing: no-search questions, freshness questions, multi-source questions, conflicting-source questions, prompt injection in retrieved content, search outage, empty results, malformed citation, and conversation follow-up. With documents, add: answer in the document, answer absent from the document, document and web disagree, prompt injection inside a PDF, a follow-up that needs query rewriting, and another user's document that must never be retrieved. Measure at minimum search-decision accuracy, citation validity/precision, task-answer rubric score, unsupported-claim rate, latency, and approximate cost. Run a fast deterministic subset in CI; document how to run model-based evaluations separately.
 
 Coverage numbers are signals, not goals. Require strong coverage of security, ownership, billing-sensitive/provider, graph routing, and streaming code. A happy-path-only suite is unacceptable.
 
@@ -439,7 +456,7 @@ The work is done only when:
 - Do not edit generated frontend API files by hand; change the backend schema and regenerate.
 - Schema changes always include an Alembic migration and downgrade path unless the migration is explicitly irreversible and documented.
 - Do not expose raw exceptions, chain-of-thought, provider payloads, or secrets.
-- Do not introduce multi-agent orchestration, vector databases, Celery, Kafka, Kubernetes, or a cloud dependency unless a measured requirement justifies it and the user approves the scope.
+- Do not introduce multi-agent orchestration, vector databases, Celery, Kafka, Kubernetes, or a cloud dependency unless a measured requirement justifies it and the user approves the scope. pgvector inside the existing PostgreSQL is approved by ADR-0015; a separate vector database is not.
 - Prefer explicit, readable code over clever metaprogramming. Add comments for why, not what.
 - Keep commits and changes scoped. Report commands run, test results, known limitations, and any unverified assumptions.
 - If a requested change conflicts with this specification, explain the conflict and ask for a decision when it materially affects security, data compatibility, cost, or architecture.
