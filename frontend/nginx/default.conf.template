@@ -21,34 +21,28 @@ server {
     root /usr/share/nginx/html;
     server_tokens off;
 
+    # Resolved per request (a variable in proxy_pass), not once at startup: a
+    # restarted API container gets a new address. Set at server level so both
+    # API locations below share it; the snippet they include cannot hold
+    # these two lines, because only this template is filled in by envsubst.
+    resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
+    set $api_upstream ${API_UPSTREAM};
+
     # The API, same origin: no CORS, and the refresh cookie scoped to
     # /api/v1/auth works exactly as in development.
     location /api/ {
-        # Resolved per request (a variable in proxy_pass), not once at
-        # startup: a restarted API container gets a new address.
-        resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
-        set $api_upstream ${API_UPSTREAM};
-        proxy_pass $api_upstream;
-
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_set_header Host $host;
-        # Replaced, never appended to: $remote_addr is the client as resolved
-        # by the real_ip rules (25-real-ip.sh), and the API rate-limits on
-        # this one value. Appending would forward whatever the client sent,
-        # and the API would key its limits on an address the client chose.
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $forwarded_proto;
-
-        # Run streams are server-sent events: every event must reach the
-        # browser as it is written, not when a buffer fills.
-        proxy_buffering off;
-        proxy_cache off;
-        # Longer than the heartbeat (15 s) so a quiet stream is never cut.
-        proxy_read_timeout 120s;
+        include /etc/nginx/snippets/api-proxy.conf;
         # Matches the API's MAX_REQUEST_BODY_BYTES; refused here first.
         client_max_body_size 256k;
-        # The API sets its own security headers; none are added here.
+    }
+
+    # PDF upload (ADR-0015), the one route allowed a large body. A regex
+    # location, so it wins over the /api/ prefix above. 11m is the API's
+    # MAX_DOCUMENT_BYTES (10 MiB) plus room for the multipart framing; raise
+    # both together.
+    location ~ ^/api/v1/conversations/[^/]+/documents$ {
+        include /etc/nginx/snippets/api-proxy.conf;
+        client_max_body_size 11m;
     }
 
     # add_header in a location replaces, not extends, the server's headers,

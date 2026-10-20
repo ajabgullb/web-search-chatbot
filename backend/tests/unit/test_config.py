@@ -37,6 +37,7 @@ def production_settings(**overrides: object) -> Settings:
         "frontend_origin": "https://app.example.com",
         "llm_api_key": "sk-not-a-real-key",
         "search_api_key": "tvly-not-a-real-key",
+        "embedding_api_key": "sk-embed-not-a-real-key",
         "redis_url": "redis://redis:6379/0",
         "database_url": "postgresql+asyncpg://app:a-long-random-password@db:5432/app",
         "smtp_host": "smtp.example.com",
@@ -66,6 +67,14 @@ def test_production_requires_provider_credentials() -> None:
         production_settings(llm_api_key="")
     with pytest.raises(ValidationError, match="SEARCH_API_KEY"):
         production_settings(search_api_key="")
+    with pytest.raises(ValidationError, match="EMBEDDING_API_KEY"):
+        production_settings(embedding_api_key="", llm_base_url="https://api.groq.com/openai/v1")
+
+
+def test_production_reuses_an_openai_chat_key_for_embeddings() -> None:
+    """Same host, same provider: one key is enough."""
+    settings = production_settings(embedding_api_key="")
+    assert settings.effective_embedding_api_key == "sk-not-a-real-key"
 
 
 def test_production_requires_redis() -> None:

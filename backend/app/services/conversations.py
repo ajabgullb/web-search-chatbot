@@ -21,6 +21,7 @@ from app.models.message import Message, MessageRole, MessageStatus
 from app.models.user import User
 from app.repositories.citations import CitationRepository
 from app.repositories.conversations import ConversationRepository
+from app.repositories.documents import DocumentRepository
 from app.repositories.messages import MessageRepository
 from app.repositories.runs import RunRepository
 
@@ -164,6 +165,12 @@ class ConversationService:
         )
         if not deleted:
             raise ConversationNotFound
+        # The conversation is kept for audit; uploaded documents are not. They
+        # are the user's private text, and a delete they asked for must not
+        # leave it behind (ADR-0015). Same transaction: both or neither.
+        await DocumentRepository(self._session).delete_for_conversation(
+            user_id=user.id, conversation_id=conversation_id
+        )
         await self._session.commit()
 
     async def list_messages(

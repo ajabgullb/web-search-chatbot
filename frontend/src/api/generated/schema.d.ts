@@ -218,6 +218,50 @@ export interface paths {
         patch: operations["rename_conversation_api_v1_conversations__conversation_id__patch"];
         trace?: never;
     };
+    "/api/v1/conversations/{conversation_id}/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Documents */
+        get: operations["list_documents_api_v1_conversations__conversation_id__documents_get"];
+        put?: never;
+        /**
+         * Upload Document
+         * @description Upload a PDF. Returns at once with status ``processing``; poll until ``ready``.
+         *
+         *     The body is read here, after authentication, the rate limit, and the
+         *     ownership check have all passed. Declaring the file as a parameter would
+         *     have FastAPI read and spool the whole body first, so an anonymous or
+         *     throttled caller could still make the server receive 10 MB.
+         */
+        post: operations["upload_document_api_v1_conversations__conversation_id__documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conversations/{conversation_id}/documents/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Document */
+        get: operations["get_document_api_v1_conversations__conversation_id__documents__document_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Document */
+        delete: operations["delete_document_api_v1_conversations__conversation_id__documents__document_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conversations/{conversation_id}/messages": {
         parameters: {
             query?: never;
@@ -479,6 +523,52 @@ export interface components {
             /** Title */
             title: string;
         };
+        /**
+         * DocumentList
+         * @description Every document in the conversation, in upload order. Capped, so unpaginated.
+         */
+        DocumentList: {
+            /** Items */
+            items: components["schemas"]["DocumentRead"][];
+        };
+        /** DocumentRead */
+        DocumentRead: {
+            /** Byte Size */
+            byte_size: number;
+            /** Chunk Count */
+            chunk_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Error Code
+             * @description Set when status is failed, e.g. embedding_unavailable.
+             */
+            error_code?: string | null;
+            /** Filename */
+            filename: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Page Count */
+            page_count: number;
+            /** @description processing: stored and being prepared; ready: answers can use it; failed: it could not be prepared (see error_code). Poll while processing. */
+            status: components["schemas"]["DocumentStatus"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * DocumentStatus
+         * @enum {string}
+         */
+        DocumentStatus: "processing" | "ready" | "failed";
         /** ErrorBody */
         ErrorBody: {
             /**
@@ -1382,6 +1472,149 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ConversationRead"];
                 };
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_documents_api_v1_conversations__conversation_id__documents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentList"];
+                };
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    upload_document_api_v1_conversations__conversation_id__documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The PDF. At most MAX_DOCUMENT_BYTES (10 MiB by default).
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description This exact file was already in the conversation; it is returned as is. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRead"];
+                };
+            };
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRead"];
+                };
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_document_api_v1_conversations__conversation_id__documents__document_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRead"];
+                };
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_document_api_v1_conversations__conversation_id__documents__document_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error envelope returned for every failure. */
             default: {

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -122,8 +124,21 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+@dataclass(frozen=True, slots=True)
+class BodyLimitOverride:
+    """A different body limit for one method on matching paths."""
+
+    method: str
+    path: re.Pattern[str]
+    max_bytes: int
+
+
 class BodySizeLimitMiddleware:
     """Refuse request bodies over ``MAX_REQUEST_BODY_BYTES`` before parsing them.
+
+    ``overrides`` raise the limit for named routes only: the PDF upload. Every
+    other route keeps the small default, so the large limit is not a way to
+    push a 10 MB body at the login endpoint.
 
     Pure ASGI rather than ``BaseHTTPMiddleware``, because it must see the body
     as it arrives. Two cases:
@@ -137,18 +152,28 @@ class BodySizeLimitMiddleware:
       else into a generic 400. The normal handlers then build the envelope.
     """
 
-    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+    def __init__(
+        self, app: ASGIApp, *, max_bytes: int, overrides: Sequence[BodyLimitOverride] = ()
+    ) -> None:
         self._app = app
         self._max_bytes = max_bytes
+        self._overrides = tuple(overrides)
+
+    def _limit_for(self, scope: Scope) -> int:
+        for override in self._overrides:
+            if scope["method"] == override.method and override.path.fullmatch(scope["path"]):
+                return override.max_bytes
+        return self._max_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self._app(scope, receive, send)
             return
 
+        max_bytes = self._limit_for(scope)
         declared = _content_length(scope)
-        if declared is not None and declared > self._max_bytes:
-            await error_response(self._too_large())(scope, receive, send)
+        if declared is not None and declared > max_bytes:
+            await error_response(_too_large(max_bytes))(scope, receive, send)
             return
 
         received = 0
@@ -158,14 +183,15 @@ class BodySizeLimitMiddleware:
             message = await receive()
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
-                if received > self._max_bytes:
+                if received > max_bytes:
                     raise StarletteHTTPException(413, PayloadTooLarge.message)
             return message
 
         await self._app(scope, limited_receive, send)
 
-    def _too_large(self) -> PayloadTooLarge:
-        return PayloadTooLarge(details={"max_bytes": self._max_bytes})
+
+def _too_large(max_bytes: int) -> PayloadTooLarge:
+    return PayloadTooLarge(details={"max_bytes": max_bytes})
 
 
 def _content_length(scope: Scope) -> int | None:

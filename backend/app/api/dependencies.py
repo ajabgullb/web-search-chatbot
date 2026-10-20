@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import AsyncIterator
-from typing import Annotated
+from typing import Annotated, Protocol
 
 from fastapi import Depends, Request
 from fastapi.params import Depends as DependsMarker
@@ -34,6 +34,7 @@ from app.providers.email import EmailSender
 from app.repositories.users import UserRepository
 from app.services.auth import AuthService, ClientContext
 from app.services.conversations import ConversationService
+from app.services.documents import DocumentService
 from app.services.run_executor import AgentRuntime, RunManager
 from app.services.runs import RunService
 
@@ -176,6 +177,39 @@ def get_run_manager(request: Request) -> RunManager:
 RunManagerDep = Annotated[RunManager, Depends(get_run_manager)]
 
 
+def get_document_service(
+    request: Request, session: SessionDep, settings: SettingsDep
+) -> DocumentService:
+    """Resolved per request from app.state, so a test can swap a provider on
+    a running app and the next upload is stamped with it."""
+    state = request.app.state
+    return DocumentService(
+        session,
+        settings,
+        parser=state.pdf_parser,
+        ingestion=state.ingestion,
+        embedding_model=state.embedding_provider.model,
+        embedding_dimensions=state.embedding_provider.dimensions,
+    )
+
+
+DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
+
+
+class ThreadEraser(Protocol):
+    """The one checkpointer operation the API calls: erasing a thread."""
+
+    async def adelete_thread(self, thread_id: str) -> None: ...
+
+
+def get_thread_eraser(request: Request) -> ThreadEraser:
+    eraser: ThreadEraser = request.app.state.checkpointer
+    return eraser
+
+
+ThreadEraserDep = Annotated[ThreadEraser, Depends(get_thread_eraser)]
+
+
 def get_agent_runtime(request: Request) -> AgentRuntime:
     """Resolved per request from app.state, so a test can swap a provider on
     a running app and the next run uses it."""
@@ -214,6 +248,19 @@ async def enforce_run_rate_limit(
         key=str(current_user.id),
         limit=settings.rate_limit_runs,
         window_seconds=settings.rate_limit_runs_window_seconds,
+    )
+
+
+async def enforce_document_upload_limit(
+    current_user: CurrentUserDep, settings: SettingsDep, limiter: RateLimiterDep
+) -> None:
+    """Per user: every upload costs a parse process and embeddings."""
+    await _enforce_limit(
+        limiter,
+        bucket="document_uploads",
+        key=str(current_user.id),
+        limit=settings.rate_limit_document_uploads,
+        window_seconds=settings.rate_limit_document_uploads_window_seconds,
     )
 
 

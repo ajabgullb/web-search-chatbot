@@ -110,7 +110,7 @@ class TestRequestsAndResponses:
 
     async def test_a_missing_key_fails_without_a_request(self) -> None:
         provider, seen = provider_with(
-            lambda _: embeddings_response([unit(0)]), embedding_api_key=""
+            lambda _: embeddings_response([unit(0)]), embedding_api_key="", llm_api_key=""
         )
         with pytest.raises(EmbeddingAuthError, match="EMBEDDING_API_KEY"):
             await provider.embed(["alpha"])
@@ -127,6 +127,30 @@ class TestRequestsAndResponses:
         provider, seen = provider_with(lambda _: embeddings_response([unit(0)]))
         with pytest.raises(ValueError, match=complaint):
             await provider.embed(texts)
+        assert seen == []
+        await provider.aclose()
+
+    async def test_the_chat_key_is_reused_when_both_are_openai(self) -> None:
+        provider, seen = provider_with(
+            lambda _: embeddings_response([unit(0)]),
+            embedding_api_key="",
+            llm_api_key="sk-chat",
+            llm_base_url="https://api.openai.com/v1",
+        )
+        await provider.embed(["alpha"])
+        assert seen[0].headers["authorization"] == "Bearer sk-chat"
+        await provider.aclose()
+
+    async def test_another_providers_chat_key_is_never_sent_to_openai(self) -> None:
+        """A Groq key reused here would hand one provider's credential to another."""
+        provider, seen = provider_with(
+            lambda _: embeddings_response([unit(0)]),
+            embedding_api_key="",
+            llm_api_key="gsk-groq-key",
+            llm_base_url="https://api.groq.com/openai/v1",
+        )
+        with pytest.raises(EmbeddingAuthError):
+            await provider.embed(["alpha"])
         assert seen == []
         await provider.aclose()
 
@@ -226,6 +250,25 @@ class TestConfiguration:
         """A mismatch would otherwise surface as a failed insert on the first upload."""
         with pytest.raises(ValidationError, match="EMBEDDING_DIMENSIONS"):
             Settings(embedding_dimensions=512)
+
+    @pytest.mark.parametrize(
+        ("embedding_key", "llm_key", "llm_base_url", "expected"),
+        [
+            ("sk-embed", "sk-chat", "https://api.openai.com/v1", "sk-embed"),
+            ("", "sk-chat", "https://api.openai.com/v1", "sk-chat"),
+            ("", "sk-chat", "https://API.openai.com/v1/", "sk-chat"),
+            ("", "gsk-groq", "https://api.groq.com/openai/v1", ""),
+            ("", "sk-or", "https://openrouter.ai/api/v1", ""),
+            ("sk-embed", "gsk-groq", "https://api.groq.com/openai/v1", "sk-embed"),
+        ],
+    )
+    def test_which_key_embeddings_use(
+        self, embedding_key: str, llm_key: str, llm_base_url: str, expected: str
+    ) -> None:
+        settings = Settings(
+            embedding_api_key=embedding_key, llm_api_key=llm_key, llm_base_url=llm_base_url
+        )
+        assert settings.effective_embedding_api_key == expected
 
     def test_the_default_model_is_the_cheapest(self) -> None:
         # The declared default, not Settings(): a developer's .env may override it.

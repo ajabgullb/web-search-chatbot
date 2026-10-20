@@ -8,6 +8,7 @@ from app.models.auth_session import AuthSession
 from app.models.citation import Citation
 from app.models.conversation import Conversation
 from app.models.document import Document, DocumentChunk, DocumentStatus
+from app.models.embedding_usage import EmbeddingPurpose, EmbeddingUsage
 from app.models.message import Message, MessageRole, MessageStatus
 from app.models.password_reset_token import PasswordResetToken
 from app.models.run import Run, RunStatus
@@ -20,6 +21,8 @@ __all__ = [
     "Document",
     "DocumentChunk",
     "DocumentStatus",
+    "EmbeddingPurpose",
+    "EmbeddingUsage",
     "Message",
     "MessageRole",
     "MessageStatus",

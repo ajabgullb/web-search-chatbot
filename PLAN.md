@@ -388,13 +388,16 @@ Deferred from the original 11a list: the `citations` changes move to 11c, the fi
 - Embedding provider built in the lifespan and closed on shutdown; production refuses to start without `EMBEDDING_API_KEY` (added to `compose.prod.yaml` and `.env.production.example`).
 - Document limits in typed settings (`MAX_DOCUMENT_BYTES`, pages, characters, chunks, documents per conversation).
 - `POST/GET/DELETE /conversations/{id}/documents[/{document_id}]` with ownership at the SQL boundary, `404` for guessed IDs, verified email required, per-user upload rate limit, and per-conversation document cap.
-- Upload-only body limit (API middleware and nginx), `%PDF-` magic-byte check, streamed size cap.
-- `pypdf` parsing in a bounded process pool with timeout and memory limit; `pdf_invalid`, `pdf_encrypted`, `pdf_no_text`, `pdf_too_large`.
+- Upload-only body limit (API middleware, and an nginx location sharing a new `api-proxy.conf` snippet), `%PDF-` magic-byte check, streamed size cap; the body is read only after auth, rate limit, verification, and ownership pass.
+- `pypdf` parsing in a child process per upload, forked from a forkserver, with timeout and memory limit, at most `DOCUMENT_PARSE_WORKERS` at once; `pdf_invalid`, `pdf_encrypted`, `pdf_no_text`, `pdf_too_large`, `pdf_too_complex`.
 - Page-bounded chunking with overlap; SHA-256 duplicate detection.
-- In-process ingestion manager: `SKIP LOCKED` lease, batched embedding, attempt limit, startup and periodic sweep, daily embedding-token quota.
+- In-process ingestion manager: `SKIP LOCKED` lease, batched embedding, attempt limit, startup and periodic sweep.
+- Daily embedding-token quota from an append-only `embedding_usage` ledger (migration), so deleting a document does not refund its tokens.
 - Document deletion and conversation deletion hard-delete documents and call `checkpointer.adelete_thread`. `409` while a run is active.
 
 **Done when:** integration tests cover cross-user access, duplicate upload, each rejection code, a crash between chunking and embedding (sweep resumes it), quota exhaustion, and checkpoint removal on delete; a hostile-PDF test proves a hung parse is killed.
+
+**Delivered:** all of the above. Verified beyond the suite: nginx per-route limits exercised against a running container (300 KB passes only on the upload path, 12 MB is refused there), and two deliberate breakages (no hard delete on conversation delete, no attempt counting) each caught by the intended tests.
 
 ### 11c — Retrieval in the agent
 
@@ -410,7 +413,7 @@ Deferred from the original 11a list: the `citations` changes move to 11c, the fi
 
 ### 11d — Frontend
 
-- PDF upload control in the composer (`accept="application/pdf"`, client-side size check mirrored from the server limit), document chips with status, polling while `processing`, remove action, accessible error states.
+- PDF upload control in the composer (`accept="application/pdf"`, client-side size check mirrored from the server limit), document chips with status, polling while `processing`, remove action, accessible error states. **Delivered early, ahead of 11c, so uploads can be tried by hand:** a paperclip button inside the message box, chips above the text, a backend test pinning `MAX_DOCUMENT_BYTES` in `constants.ts` to the setting. The chips carry a temporary note that answers do not use documents yet; remove it in 11c.
 - Document source cards (filename and page, no external link); `rehypeCitations.ts` accepts `D` labels.
 - OpenAPI and the generated client regenerated and committed.
 

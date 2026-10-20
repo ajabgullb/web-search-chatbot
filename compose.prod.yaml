@@ -31,6 +31,13 @@ x-api-environment: &api-environment
   LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY}
   SEARCH_PROVIDER: tavily
   SEARCH_API_KEY: ${SEARCH_API_KEY:?set SEARCH_API_KEY}
+  # OpenAI's own endpoint, independent of LLM_BASE_URL (ADR-0015).
+  # Empty reuses LLM_API_KEY when LLM_BASE_URL is OpenAI's; the API refuses to
+  # start if neither applies.
+  EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+  EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://api.openai.com/v1}
+  MAX_DOCUMENT_BYTES: ${MAX_DOCUMENT_BYTES:-10485760}
+  DAILY_EMBEDDING_TOKEN_LIMIT_PER_USER: ${DAILY_EMBEDDING_TOKEN_LIMIT_PER_USER:-2000000}
   SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
   SMTP_PORT: ${SMTP_PORT:-587}
   SMTP_USERNAME: ${SMTP_USERNAME:-}

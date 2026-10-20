@@ -68,6 +68,12 @@ retrieval returning plausible but irrelevant chunks.
 - Configuration is separate from the chat model: `EMBEDDING_API_KEY`,
   `EMBEDDING_BASE_URL` (default `https://api.openai.com/v1`),
   `EMBEDDING_MODEL=text-embedding-3-small`, `EMBEDDING_DIMENSIONS=1536`.
+  An empty `EMBEDDING_API_KEY` reuses `LLM_API_KEY`, as the product owner
+  asked (2026-10-20), but only when `LLM_BASE_URL` and `EMBEDDING_BASE_URL`
+  are on the same host. That is the case when both are OpenAI, so it is the
+  same provider's key. With a chat model elsewhere, reusing its key would send
+  one provider's credential to another, so there is no fallback and
+  production refuses to start without an explicit key.
 - **Full 1536 dimensions.** The model can return shorter vectors at the same
   price, but per-conversation storage is small, so there is no reason to trade
   away quality. The column is `vector(1536)`. Every document records the
@@ -87,20 +93,33 @@ retrieval returning plausible but irrelevant chunks.
    declared `Content-Type` and the extension are not trusted. The size cap
    (`MAX_DOCUMENT_BYTES`, 10 MB) is enforced while the body streams in. Only
    this route gets the larger body limit; everything else keeps 256 KB, in
-   nginx and in the API middleware.
-2. **Parse in a separate process.** PDF parsing runs in a small
-   `ProcessPoolExecutor` (`DOCUMENT_PARSE_WORKERS`, 2) under a timeout
-   (`DOCUMENT_PARSE_TIMEOUT_SECONDS`, 30) and an address-space limit set in the
-   worker initializer. A hostile PDF can hang or bloat a parser; a process can
-   be killed and replaced, and a thread cannot. The process pool also keeps
-   CPU-bound parsing off the event loop, which is the same reason ADR-0013
-   moved Argon2 into a thread pool. A full pool returns `503`, so callers queue
-   on their side rather than in our memory. Parser: `pypdf` (BSD-3-Clause).
-   PyMuPDF was rejected for its AGPL licence.
+   nginx and in the API middleware. The handler parses the multipart body
+   itself, after authentication, the upload rate limit, email verification,
+   and conversation ownership have passed. Declaring the file as a FastAPI
+   parameter would have the whole body read and spooled before any of those
+   ran. The request body schema is declared by hand for OpenAPI.
+2. **Parse in a separate process.** Each parse runs in a child process of its
+   own, forked from a `forkserver` that preloads only `pypdf` and the worker
+   module. A hostile PDF can hang or bloat a parser; a process can be killed,
+   and a thread cannot. An earlier draft used a `ProcessPoolExecutor`. It was
+   replaced because a pool cannot kill one stuck task: a hanging parse would
+   hold its worker until the whole pool was torn down. Forking from the
+   forkserver, rather than from the API process, avoids forking a process
+   with an event loop and threads, and is fast because `pypdf` is already
+   loaded. The child sets an address-space limit (`DOCUMENT_PARSE_MEMORY_MB`,
+   1024) and is killed at `DOCUMENT_PARSE_TIMEOUT_SECONDS` (30). At most
+   `DOCUMENT_PARSE_WORKERS` (2) parses run at once; another returns `503`, so
+   callers queue on their side rather than in our memory. Parser: `pypdf`
+   (BSD-3-Clause). PyMuPDF was rejected for its AGPL licence.
 3. **Reject what cannot be answered from.** Encrypted PDFs fail with
-   `pdf_encrypted`. PDFs with no text layer (scans) fail with `pdf_no_text`,
-   because there is no OCR in this scope. Documents over `MAX_DOCUMENT_PAGES`
-   (200) or `MAX_DOCUMENT_CHARS` (500,000) fail with `pdf_too_large`.
+   `pdf_encrypted`, except those encrypted only against editing, with an
+   empty password to read, which are read normally. PDFs with no text layer
+   (scans) fail with `pdf_no_text`, because there is no OCR in this scope.
+   Documents over `MAX_DOCUMENT_PAGES` (200), `MAX_DOCUMENT_CHARS` (500,000),
+   or `MAX_CHUNKS_PER_DOCUMENT` (400) fail with `pdf_too_large`, a limit the
+   user can act on by splitting the file. A parse that runs out of time or
+   memory, crashes, or trips `pypdf`'s decompression-bomb guard fails with
+   `pdf_too_complex`, which the user cannot act on.
 4. **Chunk.** Chunks target about 2,000 characters (around 500 tokens), split
    on paragraph and line boundaries, overlap by 200 characters, and never span
    a page boundary, so every chunk cites exactly one page.
@@ -198,7 +217,11 @@ unknown labels.
   `adelete_thread(conversation_id)`. This loses nothing, because each run
   rebuilds its transcript from the `messages` table (ADR-0008), and it leaves
   the checkpointer's tables untouched by application SQL (§5). Per-conversation
-  scope is what makes this a single call.
+  scope is what makes this a single call. One known gap: deleting a
+  conversation cancels its running answer by signal, and a run on another
+  replica may write one last checkpoint step after the erase. Removing a
+  single document has no such gap, because it is refused while a run is
+  active.
 - Document text and filenames are never logged. Logs carry `document_id`.
 - Deleted text survives in backups until they rotate, and document text plus
   queries are sent to OpenAI for embedding. Both are stated in `security.md`.
@@ -219,6 +242,15 @@ The same file uploaded twice to one conversation is recognised by its SHA-256
 and returns the existing document instead of embedding it again. Uploads
 require a verified email, like runs (ADR-0013).
 
+**The quota is kept in a ledger, not on documents.** `embedding_usage` is an
+append-only table of tokens spent per user, written with each embedding batch
+(and, from 11c, each query). Counting on `documents` rows was rejected:
+deleting a document would refund its tokens, so delete-and-re-upload would
+reset the quota. An upload is checked against tokens spent in the last 24
+hours, plus the estimated remaining cost of the user's documents still
+processing (so several quick uploads cannot all pass before any has spent
+anything), plus its own estimate of one token per four characters.
+
 ### API
 
 - `POST /conversations/{id}/documents`: multipart upload, returns `202` with
@@ -230,8 +262,9 @@ require a verified email, like runs (ADR-0013).
 - `DELETE /conversations/{id}/documents/{document_id}`.
 
 Errors use the existing envelope. New codes: `pdf_invalid`, `pdf_encrypted`,
-`pdf_no_text`, `pdf_too_large`, `document_limit_reached`,
-`embedding_quota_exceeded`, `document_not_found`, `embedding_unavailable`.
+`pdf_no_text`, `pdf_too_large`, `pdf_too_complex`, `document_limit_reached`,
+`embedding_quota_exceeded`, `document_not_found`, and `embedding_unavailable`
+(a document's `error_code` when it fails, not an HTTP error).
 A guessed document or conversation UUID returns `404`.
 
 SSE additions: an `agent.status` value `reading_documents`, a
