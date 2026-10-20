@@ -53,8 +53,11 @@ message; a provider client per request would open a new connection pool.
 
 It also builds the pieces behind PDF documents (ADR-0015): the embedding
 provider (`app/providers/embeddings.py`), the PDF parser (`app/services/pdf.py`),
-which starts a forkserver and parses each upload in a child process of its
-own, and the ingestion manager (`app/services/ingestion.py`). An upload stores
+which starts a forkserver and parses and chunks each upload in a child
+process of its own, and the ingestion manager (`app/services/ingestion.py`).
+CPU-heavy work stays off the event loop: hashing an upload runs in a thread,
+and embedding vectors are formatted as SQL text in a thread before they are
+written (`docs/load-testing.md` has the measurements). An upload stores
 extracted text as chunks and returns; the ingestion manager is a background
 task, one per process, that writes the embeddings. Replicas share that work
 through the database: a document is claimed with `FOR UPDATE SKIP LOCKED` and

@@ -25,19 +25,14 @@ from app.agent.tools.documents import (
     keyword_terms,
     select,
 )
+from app.core import telemetry
 from app.db.session import Database
 from app.models.embedding_usage import EmbeddingPurpose
-from app.providers.embeddings import (
-    EmbeddingBatch,
-    EmbeddingError,
-    EmbeddingProvider,
-    EmbeddingTransientError,
-)
+from app.providers.embeddings import EmbeddingError, EmbeddingProvider
 from app.repositories.documents import DocumentRepository
+from app.services.embedding_calls import embed_with_retry
 
 logger = logging.getLogger(__name__)
-
-RETRY_BACKOFF_SECONDS = 0.5
 
 
 class PostgresDocumentRetriever:
@@ -67,8 +62,14 @@ class PostgresDocumentRetriever:
         started = time.monotonic()
         try:
             async with asyncio.timeout(limits.document_query_timeout_seconds):
-                batch = await self._embed_with_retry(provider, query)
+                batch = await embed_with_retry(provider, [query], purpose="query")
         except (EmbeddingError, TimeoutError) as exc:
+            elapsed = time.monotonic() - started
+            if isinstance(exc, TimeoutError):
+                # The helper counts the calls that returned; a call cut off by
+                # the deadline never did, so it is counted here.
+                telemetry.record_embedding("query", "timeout", elapsed)
+            telemetry.record_document_retrieval("failed", elapsed)
             logger.warning("document_search_unavailable", extra={"error_type": type(exc).__name__})
             return DocumentSearch(failed=True)
 
@@ -107,6 +108,9 @@ class PostgresDocumentRetriever:
             max_chars=limits.document_context_chars,
             exact=exact_terms(terms),
         )
+        telemetry.record_document_retrieval(
+            "chunks" if chosen else "empty", time.monotonic() - started
+        )
         logger.info(
             "document_search",
             extra={
@@ -118,10 +122,3 @@ class PostgresDocumentRetriever:
             },
         )
         return DocumentSearch(chunks=chosen)
-
-    async def _embed_with_retry(self, provider: EmbeddingProvider, query: str) -> EmbeddingBatch:
-        try:
-            return await provider.embed([query])
-        except EmbeddingTransientError:
-            await asyncio.sleep(RETRY_BACKOFF_SECONDS)
-            return await provider.embed([query])

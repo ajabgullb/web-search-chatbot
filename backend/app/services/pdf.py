@@ -23,12 +23,19 @@ from collections.abc import Callable
 from multiprocessing.connection import Connection
 from typing import Any
 
+from app.core import telemetry
 from app.core.config import Settings
-from app.services.pdf_worker import ParseErrorCode, ParseFailure, ParseLimits, run_in_child
+from app.services.pdf_worker import (
+    ParsedPdf,
+    ParseErrorCode,
+    ParseFailure,
+    ParseLimits,
+    run_in_child,
+)
 
 logger = logging.getLogger(__name__)
 
-# The worker's own imports: nothing from the app beyond this module.
+# The worker's own imports: nothing from the app beyond it and chunking.
 _FORKSERVER_PRELOAD = ["app.services.pdf_worker"]
 
 # After a kill, how long to wait for the process to be reaped.
@@ -79,8 +86,8 @@ class PdfParser:
             max_concurrent=settings.document_parse_workers,
         )
 
-    async def parse(self, data: bytes) -> list[str]:
-        """Each page's text, in order. Raises :class:`PdfError` or :class:`PdfParserBusy`."""
+    async def parse(self, data: bytes) -> ParsedPdf:
+        """The page count and chunks. Raises :class:`PdfError` or :class:`PdfParserBusy`."""
         if self._slots.locked():
             raise PdfParserBusy
         async with self._slots:
@@ -88,18 +95,17 @@ class PdfParser:
             # Waiting on a pipe blocks, so it happens in a thread. The slot
             # bounds those threads too.
             result = await asyncio.to_thread(self._parse_blocking, data)
+            elapsed = time.monotonic() - started
+            outcome = result.code if isinstance(result, ParseFailure) else "ok"
+            telemetry.record_pdf_parse(outcome, elapsed)
             logger.info(
-                "pdf_parsed",
-                extra={
-                    "duration_ms": round((time.monotonic() - started) * 1000),
-                    "outcome": result.code if isinstance(result, ParseFailure) else "ok",
-                },
+                "pdf_parsed", extra={"duration_ms": round(elapsed * 1000), "outcome": outcome}
             )
         if isinstance(result, ParseFailure):
             raise PdfError(result.code, limit=result.limit)
         return result
 
-    def _parse_blocking(self, data: bytes) -> list[str] | ParseFailure:
+    def _parse_blocking(self, data: bytes) -> ParsedPdf | ParseFailure:
         receive, send = self._context.Pipe(duplex=False)
         process = self._context.Process(
             target=self._target, args=(data, self._limits, send), daemon=True
@@ -113,7 +119,7 @@ class PdfParser:
                 logger.warning("pdf_parse_timeout", extra={"timeout_seconds": self._timeout})
                 return ParseFailure("pdf_too_complex")
             try:
-                reply: list[str] | ParseFailure = receive.recv()
+                reply: ParsedPdf | ParseFailure = receive.recv()
             except EOFError:
                 # Killed by the kernel or crashed in native code.
                 logger.warning("pdf_parse_crashed", extra={"exit_code": process.exitcode})

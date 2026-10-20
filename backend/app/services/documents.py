@@ -11,6 +11,7 @@ Embedding happens afterwards, in the background (``ingestion.py``).
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import math
@@ -44,9 +45,9 @@ from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.user import User
 from app.repositories.documents import CHARS_PER_TOKEN, DocumentRepository
 from app.repositories.runs import RunRepository
-from app.services.chunking import chunk_pages
 from app.services.conversations import ConversationService
 from app.services.pdf import PdfError, PdfParser, PdfParserBusy
+from app.services.pdf_worker import ParsedPdf
 
 logger = logging.getLogger(__name__)
 
@@ -146,10 +147,26 @@ class DocumentService:
     async def upload(
         self, *, user: User, conversation_id: uuid.UUID, filename: str | None, data: bytes
     ) -> UploadResult:
+        """Store a PDF's text for the conversation; every outcome is counted."""
+        try:
+            result = await self._upload(
+                user=user, conversation_id=conversation_id, filename=filename, data=data
+            )
+        except AppError as exc:
+            telemetry.record_document_upload(exc.code)
+            raise
+        telemetry.record_document_upload("accepted" if result.created else "duplicate")
+        return result
+
+    async def _upload(
+        self, *, user: User, conversation_id: uuid.UUID, filename: str | None, data: bytes
+    ) -> UploadResult:
         await self.check_can_upload(user=user, conversation_id=conversation_id)
         self._check_bytes(data)
 
-        sha256 = hashlib.sha256(data).hexdigest()
+        # In a thread: hashlib releases the GIL for large inputs, and 10 MiB
+        # took 33 ms that the event loop would otherwise have waited out.
+        sha256 = await asyncio.to_thread(lambda: hashlib.sha256(data).hexdigest())
         existing = await self._documents.find_by_sha(
             user_id=user.id, conversation_id=conversation_id, content_sha256=sha256
         )
@@ -163,15 +180,14 @@ class DocumentService:
                 f"A conversation can hold at most {limit} documents.", details={"limit": limit}
             )
 
-        pages = await self._parse(data)
-        chunks = chunk_pages(pages)
-        if not chunks:
-            raise PdfNoText
+        # Parsed and chunked in a child process (pdf_worker.py).
+        parsed = await self._parse(data)
+        chunks = parsed.chunks
         if len(chunks) > self._settings.max_chunks_per_document:
             raise PdfTooLarge(
                 details={"limit": "chunks", "max": self._settings.max_chunks_per_document}
             )
-        char_count = sum(len(chunk.content) for chunk in chunks)
+        char_count = sum(len(content) for _, content in chunks)
         await self._check_quota(user, estimate_tokens(char_count))
 
         document = Document(
@@ -181,7 +197,7 @@ class DocumentService:
             filename=sanitize_filename(filename),
             content_sha256=sha256,
             byte_size=len(data),
-            page_count=len(pages),
+            page_count=parsed.page_count,
             char_count=char_count,
             chunk_count=len(chunks),
             status=DocumentStatus.processing,
@@ -194,10 +210,10 @@ class DocumentService:
                 user_id=user.id,
                 conversation_id=conversation_id,
                 ordinal=ordinal,
-                page=chunk.page,
-                content=chunk.content,
+                page=page,
+                content=content,
             )
-            for ordinal, chunk in enumerate(chunks)
+            for ordinal, (page, content) in enumerate(chunks)
         ]
         self._documents.add(document, rows)
         try:
@@ -235,7 +251,7 @@ class DocumentService:
             # bytes are the file's.
             raise PdfInvalid
 
-    async def _parse(self, data: bytes) -> list[str]:
+    async def _parse(self, data: bytes) -> ParsedPdf:
         if self._parser is None:  # pragma: no cover - wiring error
             raise RuntimeError("DocumentService.upload needs a PdfParser")
         try:

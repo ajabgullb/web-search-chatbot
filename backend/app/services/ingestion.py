@@ -28,24 +28,22 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
+from app.core import telemetry
 from app.core.config import Settings
 from app.db.session import Database
 from app.models.embedding_usage import EmbeddingPurpose
 from app.providers.embeddings import (
     EmbeddingAuthError,
-    EmbeddingBatch,
     EmbeddingError,
     EmbeddingProvider,
     EmbeddingTransientError,
 )
-from app.repositories.documents import ClaimedDocument, DocumentRepository
+from app.repositories.documents import ClaimedDocument, DocumentRepository, vector_literals
+from app.services.embedding_calls import embed_with_retry
 
 logger = logging.getLogger(__name__)
 
 EMBEDDING_UNAVAILABLE = "embedding_unavailable"
-
-# The one retry the contract allows for a transient failure.
-RETRY_BACKOFF_SECONDS = 1.0
 
 
 class IngestionManager:
@@ -129,14 +127,17 @@ class IngestionManager:
                     ready = await DocumentRepository(session).mark_ready(document_id=claimed.id)
                     await session.commit()
                 if ready:
+                    elapsed = time.monotonic() - started
+                    telemetry.record_document_ingested("ready", elapsed)
                     logger.info(
-                        "document_ready",
-                        extra={**log, "duration_ms": round((time.monotonic() - started) * 1000)},
+                        "document_ready", extra={**log, "duration_ms": round(elapsed * 1000)}
                     )
                 return
 
             try:
-                batch = await self._embed_with_retry(provider, [chunk.content for chunk in pending])
+                batch = await embed_with_retry(
+                    provider, [chunk.content for chunk in pending], purpose="document"
+                )
             except EmbeddingTransientError:
                 # Not this sweep. The lease is pushed out so the provider gets
                 # a rest, and the attempt counter decides when to give up.
@@ -157,6 +158,10 @@ class IngestionManager:
                 await self._fail(claimed, reason=type(exc).__name__)
                 return
 
+            # Formatted before the transaction opens, and in a thread: it is
+            # the costliest CPU work ingestion does (see store_embeddings).
+            literals = await asyncio.to_thread(vector_literals, batch.vectors)
+
             # One transaction per batch: the vectors, what they cost, and a
             # fresh lease are recorded together or not at all. The document
             # row is locked first; see ``lock_for_batch``.
@@ -169,9 +174,8 @@ class IngestionManager:
                 )
                 if still_there:
                     await repository.store_embeddings(
-                        vectors=[
-                            (chunk.id, vector)
-                            for chunk, vector in zip(pending, batch.vectors, strict=True)
+                        literals=[
+                            (chunk.id, text) for chunk, text in zip(pending, literals, strict=True)
                         ]
                     )
                 # Recorded either way: the provider billed for it.
@@ -183,21 +187,13 @@ class IngestionManager:
                 logger.info("document_deleted_while_embedding", extra=log)
                 return
 
-    async def _embed_with_retry(
-        self, provider: EmbeddingProvider, texts: list[str]
-    ) -> EmbeddingBatch:
-        try:
-            return await provider.embed(texts)
-        except EmbeddingTransientError:
-            await asyncio.sleep(RETRY_BACKOFF_SECONDS)
-            return await provider.embed(texts)
-
     async def _fail(self, claimed: ClaimedDocument, *, reason: str) -> None:
         async with self._database.open_session() as session:
             await DocumentRepository(session).mark_failed(
                 document_id=claimed.id, error_code=EMBEDDING_UNAVAILABLE
             )
             await session.commit()
+        telemetry.record_document_ingested("failed")
         logger.warning(
             "document_failed",
             extra={"document_id": claimed.id, "attempt": claimed.attempts, "reason": reason},

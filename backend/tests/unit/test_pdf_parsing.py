@@ -32,9 +32,12 @@ async def failure_code(pdf_parser: PdfParser, data: bytes) -> str:
     return caught.value.code
 
 
-async def test_each_page_is_extracted_in_order() -> None:
-    pages = await parser().parse(make_pdf(["Alpha page", "", "Gamma page"]))
-    assert [page.strip() for page in pages] == ["Alpha page", "", "Gamma page"]
+async def test_each_page_is_read_and_chunked_in_the_child() -> None:
+    """Chunking happens in the child too: pages arrive as (page, text) chunks,
+    and a blank page contributes none but still counts."""
+    parsed = await parser().parse(make_pdf(["Alpha page", "", "Gamma page"]))
+    assert parsed.page_count == 3
+    assert parsed.chunks == [(1, "Alpha page"), (3, "Gamma page")]
 
 
 async def test_a_password_protected_pdf_is_refused() -> None:
@@ -45,8 +48,8 @@ async def test_a_password_protected_pdf_is_refused() -> None:
 
 async def test_a_pdf_encrypted_only_against_editing_is_read() -> None:
     """Common in the wild: an empty password to read, a real one to edit."""
-    pages = await parser().parse(encrypted_pdf(["readable"], user_password=""))
-    assert pages[0].strip() == "readable"
+    parsed = await parser().parse(encrypted_pdf(["readable"], user_password=""))
+    assert parsed.chunks == [(1, "readable")]
 
 
 async def test_a_pdf_with_no_text_layer_is_refused() -> None:

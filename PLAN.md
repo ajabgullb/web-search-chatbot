@@ -429,6 +429,8 @@ Deferred from the original 11a list: the `citations` changes move to 11c, the fi
 - `security.md`: hostile files, document prompt injection, third-party embedding, deletion and backup retention. `architecture.md` and `api.md` updated.
 - Load test: upload plus concurrent streams, confirming parsing does not stall the event loop.
 
+**Delivered:** metrics for uploads, parsing, ingestion, embedding calls and tokens, and retrieval, with an alerting note in `docs/api.md`; a log-hygiene test proving document text, filenames, questions, and answers never reach the logs; an upload phase in the load test, whose first run found CPU work on the event loop (vector formatting, hashing, chunking) that was then moved off it; one shared embed-and-retry helper for ingestion and retrieval; README, `.env.example`, architecture, security, API, and load-testing docs brought up to date.
+
 **Verify**
 
 ```bash
