@@ -421,6 +421,8 @@ Deferred from the original 11a list: the `citations` changes move to 11c, the fi
 
 **Done when:** Vitest covers upload states, polling stop conditions, and document citations; Playwright uploads a fixture PDF with fake providers, asks about it, sees a `[D1]` citation, reloads, and deletes the document.
 
+**Delivered:** `frontend/tests/e2e/documents.spec.ts` attaches a generated PDF through the paperclip's file chooser, waits for it to be ready, gets a `[D1]` answer citing page 2, follows the marker, reloads, and removes it; a file that only claims to be a PDF is refused with the server's reason; a document does not appear in another conversation. Removing a document now refetches the thread, so its source cards disappear at once (the spec fails without it). The e2e server runs real parsing and retrieval with fake embeddings.
+
 ### 11e — Hardening and docs
 
 - Metrics from ADR-0015 (ingestion, embedding, retrieval, empty-retrieval rate).

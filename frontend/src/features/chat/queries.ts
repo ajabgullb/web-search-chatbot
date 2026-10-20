@@ -107,8 +107,12 @@ export function useDeleteDocument(conversationId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (documentId: string) => chatApi.deleteDocument(conversationId, documentId),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: chatKeys.documents(conversationId) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: chatKeys.documents(conversationId) })
+      // The server deleted every citation of the document with it. Refetch
+      // the thread so its source cards go now, not on the next reload.
+      void queryClient.invalidateQueries({ queryKey: chatKeys.messages(conversationId) })
+    },
   })
 }
 

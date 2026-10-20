@@ -3,8 +3,9 @@
     uv run uvicorn tests.e2e_server:app --port 8010
 
 Everything is the production code path (auth, runs, SSE, persistence,
-cancellation) except the two paid dependencies, which are replaced by
-deterministic stand-ins, and email, which is kept in memory so a spec can
+cancellation, PDF parsing and ingestion) except the paid dependencies (the
+model, search, and embeddings), which are replaced by deterministic
+stand-ins, and email, which is kept in memory so a spec can
 open the confirmation link it was sent. It lives under tests/ so the stand-ins
 and the outbox route never ship in an image.
 
@@ -28,6 +29,7 @@ from app.core.config import Environment, Settings
 from app.providers.email import EmailPayload
 from app.providers.llm import LLMChunk, StructuredT
 from app.providers.search import SearchHit
+from tests.fakes import FakeEmbeddings
 from tests.scratch_database import prepare_scratch_database, scratch_database_url
 
 # Words the scripted model reacts to, so each spec can pick its path.
@@ -38,6 +40,8 @@ CITED_ANSWER = (
     "Most analysts expect the first cut later this year [S2]."
 )
 DIRECT_ANSWER = "Hello! Ask me anything. For current events I search the web and cite sources."
+# Given whenever the prompt holds a passage of the user's document.
+DOCUMENT_ANSWER = "The report says quarterly revenue grew twelve percent [D1]."
 SLOW_ANSWER = " ".join(
     f"Gardening tip {n}: water deeply, mulch well, and watch the soil." for n in range(1, 60)
 )
@@ -72,8 +76,11 @@ class ScriptedLLM:
         )
         # The synthesis prompt carries the fenced sources; the direct one does not.
         has_sources = any("<<<untrusted-excerpt" in str(m.content) for m in messages)
+        has_documents = any("[D1] document:" in str(m.content) for m in messages)
         if SLOW_TRIGGER in question.lower():
             answer, delay = SLOW_ANSWER, 0.1
+        elif has_documents:
+            answer, delay = DOCUMENT_ANSWER, 0.02
         elif has_sources:
             answer, delay = CITED_ANSWER, 0.02
         else:
@@ -135,10 +142,16 @@ def build() -> FastAPI:
         rate_limit_register=10_000,
         rate_limit_forgot_password=10_000,
         rate_limit_runs=10_000,
+        rate_limit_document_uploads=10_000,
+        # The hashed bag-of-words fake scores far lower than a real model;
+        # a question sharing one word with a passage is around 0.1.
+        document_min_similarity=0.05,
+        document_ingestion_sweep_seconds=1.0,
     )
     # The lifespan builds providers through these; swap them before it runs.
     app_main.build_llm_provider = lambda _settings: ScriptedLLM()  # type: ignore[assignment]
     app_main.build_search_provider = lambda _settings: ScriptedSearch()  # type: ignore[assignment]
+    app_main.build_embedding_provider = lambda _settings: FakeEmbeddings()  # type: ignore[assignment]
     outbox = Outbox()
     app_main.build_email_sender = lambda _settings: outbox  # type: ignore[assignment]
     application = app_main.create_app(settings)
