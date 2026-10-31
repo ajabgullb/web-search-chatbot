@@ -16,6 +16,7 @@ from app.agent.routing import (
     route_after_decision,
     route_after_documents,
     route_after_search,
+    supplies_text,
     wants_web,
 )
 
@@ -90,6 +91,82 @@ class TestDefersToTheModel:
         """'hi, what is the current price' is a question, not a greeting."""
         decision = heuristic_search_decision("hi, what is the current price of gold?")
         assert decision.should_search is True
+
+
+class TestMisroutes:
+    """Phrasings the heuristics once got wrong, pinned so they stay fixed."""
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # "summarize this" reads as a text task, but no text was supplied
+            # and the subject is this week's news.
+            "Summarize this week's news about the election",
+            "Translate the latest Apple press release",
+        ],
+    )
+    def test_a_text_verb_does_not_hide_a_fresh_question(self, message: str) -> None:
+        assert heuristic_search_decision(message).should_search is True
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # "fix" and "my" are not a text task: there is no text in sight.
+            "How do I fix my bike chain?",
+            "Can you fix my sleep schedule?",
+        ],
+    )
+    def test_a_text_verb_on_something_that_is_not_text(self, message: str) -> None:
+        assert is_conversational(message) is None
+        assert heuristic_search_decision(message).should_search is not False
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "What is the current in a series circuit?",
+            "Is Python still dynamically typed?",
+            "how do I make a stock for soup",
+            "What is a z-score?",
+            "When was Python 3 released?",
+        ],
+    )
+    def test_one_ambiguous_word_is_left_to_the_model(self, message: str) -> None:
+        """'current', 'still', 'stock' have stable meanings too."""
+        assert heuristic_search_decision(message).should_search is None
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "What is the current price of bitcoin?",
+            "What is the AAPL stock price?",
+            "Is he still the CEO currently?",
+        ],
+    )
+    def test_ambiguous_words_together_still_search(self, message: str) -> None:
+        assert heuristic_search_decision(message).should_search is True
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Rewrite this: the latest release is our best yet.",
+            'Translate "breaking news from today" into Spanish.',
+            "Proofread my email:\nHi team, the current numbers are attached.",
+        ],
+    )
+    def test_supplied_text_wins_over_words_inside_it(self, message: str) -> None:
+        """The freshness words belong to the text being edited, not the ask."""
+        assert is_conversational(message) == "operates on text already supplied"
+        assert supplies_text(message)
+
+    @pytest.mark.parametrize(
+        "message",
+        ["Summarize it", "Can you summarize it?", "Summarize this for me.", "translate it"],
+    )
+    def test_a_text_task_can_point_at_text_it_does_not_contain(self, message: str) -> None:
+        """Still a text task, but the text is elsewhere: in an earlier message,
+        or in an attached document. The graph decides which."""
+        assert is_conversational(message) == "operates on text already supplied"
+        assert not supplies_text(message)
 
 
 class TestDocumentHeuristics:

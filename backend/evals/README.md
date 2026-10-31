@@ -69,10 +69,12 @@ and failed checks. It holds no answer text.
 
 ## Documents
 
-Seven cases cover the conversation's PDFs (ADR-0015): answer in the
+Nine cases cover the conversation's PDFs (ADR-0015): answer in the
 document, answer absent, document and web disagree, prompt injection inside a
 document, a follow-up that needs its query rewritten, a document-search
-outage, and a near miss (a passage that sounds related but does not answer).
+outage, a near miss (a passage that sounds related but does not answer), a
+bare "Summarize it." that must read the upload, and a pasted sentence that
+mentions "the report" and must not.
 Retrieval is scripted in both subsets (`script.documents`), so these measure
 what the agent does with what it is given: whether it reads the documents,
 cites them with `D` labels, says when they do not cover a question, and

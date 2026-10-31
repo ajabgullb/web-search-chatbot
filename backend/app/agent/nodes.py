@@ -42,7 +42,9 @@ from app.agent.routing import (
     SearchDecision,
     heuristic_search_decision,
     is_conversational,
+    is_text_task,
     refers_to_documents,
+    supplies_text,
     wants_web,
 )
 from app.agent.state import AgentState, Citation, RunError, Source, trim_history
@@ -193,7 +195,11 @@ async def decide_retrieval(state: AgentState, runtime: Runtime[AgentContext]) ->
     limit = runtime.context.limits.max_searches_per_run
     fallback_query = retrieval_query(question, _earlier_questions(messages))
 
-    if documents and refers_to_documents(question):
+    # "Summarize it" with nothing pasted: with documents attached, "it" is
+    # almost always the upload. Reading them costs one query embedding, and
+    # the relevance floor discards them if the user meant an earlier message.
+    points_at_documents = is_text_task(question) and not supplies_text(question)
+    if documents and (refers_to_documents(question) or points_at_documents):
         searching = wants_web(question)
         return AgentState(
             use_documents=True,
