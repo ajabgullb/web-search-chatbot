@@ -50,7 +50,10 @@ export function ForgotPasswordPage() {
           and expires in 30 minutes.
         </Alert>
         <p className="mt-6 text-sm text-muted-foreground">
-          <Link to="/login" className="underline underline-offset-4">
+          <Link
+            to="/login"
+            className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground"
+          >
             Back to sign in
           </Link>
         </p>
@@ -65,7 +68,10 @@ export function ForgotPasswordPage() {
       footer={
         <p>
           Remembered it?{' '}
-          <Link to="/login" className="underline underline-offset-4">
+          <Link
+            to="/login"
+            className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground"
+          >
             Sign in
           </Link>
         </p>
@@ -85,7 +91,7 @@ export function ForgotPasswordPage() {
           required
         />
 
-        <Button type="submit" className="w-full" disabled={submitting}>
+        <Button type="submit" variant="ink" size="lg" className="w-full" disabled={submitting}>
           {submitting ? 'Sending…' : 'Send reset link'}
         </Button>
       </form>

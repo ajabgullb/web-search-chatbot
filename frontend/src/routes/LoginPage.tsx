@@ -64,7 +64,10 @@ export function LoginPage() {
       footer={
         <p>
           No account?{' '}
-          <Link to="/register" className="underline underline-offset-4">
+          <Link
+            to="/register"
+            className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground"
+          >
             Create one
           </Link>
         </p>
@@ -94,14 +97,17 @@ export function LoginPage() {
           required
         />
 
-        <div className="flex items-center justify-between">
-          <Link to="/forgot-password" className="text-sm underline underline-offset-4">
+        <div className="-mt-1 flex justify-end">
+          <Link
+            to="/forgot-password"
+            className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:underline"
+          >
             Forgot password?
           </Link>
-          <Button type="submit" disabled={submitting}>
-            {submitting ? 'Signing in…' : 'Sign in'}
-          </Button>
         </div>
+        <Button type="submit" variant="ink" size="lg" className="w-full" disabled={submitting}>
+          {submitting ? 'Signing in…' : 'Sign in'}
+        </Button>
       </form>
     </AuthLayout>
   )

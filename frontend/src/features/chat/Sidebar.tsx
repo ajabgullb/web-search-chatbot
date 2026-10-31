@@ -6,13 +6,15 @@
  * things to keep in sync.
  */
 
-import { PanelLeftClose, Plus, X } from 'lucide-react'
+import { LogOut, MessageSquareDashed, PanelLeftClose, SquarePen, X } from 'lucide-react'
 import type { Ref } from 'react'
 import { useNavigate, useParams } from 'react-router'
 
+import { Logo } from '@/components/Logo'
 import { Button } from '@/components/ui/Button'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { ConversationItem } from '@/features/chat/ConversationItem'
+import { groupByRecency } from '@/features/chat/recency'
 import {
   useConversations,
   useCreateConversation,
@@ -45,6 +47,8 @@ export function Sidebar({
   const deleteConversation = useDeleteConversation()
 
   const items = conversations.data?.items ?? []
+  const groups = groupByRecency(items, new Date())
+  const initial = (user?.display_name.trim()[0] ?? '?').toUpperCase()
 
   function startNewChat() {
     createConversation.mutate(undefined, {
@@ -69,14 +73,18 @@ export function Sidebar({
       {/* Scrim, mobile only. aria-hidden because the close button in the
           panel is the accessible way out. */}
       {open ? (
-        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={onClose} aria-hidden />
+        <div
+          className="animate-fade fixed inset-0 z-30 bg-black/50 backdrop-blur-sm md:hidden"
+          onClick={onClose}
+          aria-hidden
+        />
       ) : null}
 
       <nav
         aria-label="Conversations"
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-border bg-card',
-          'transition-transform duration-200 motion-reduce:transition-none',
+          'fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-border bg-card md:bg-muted/40',
+          'transition-transform duration-300 ease-out motion-reduce:transition-none',
           'md:static md:z-auto md:translate-x-0',
           open ? 'translate-x-0' : '-translate-x-full',
           // Collapsing removes the column from layout and from the
@@ -84,16 +92,8 @@ export function Sidebar({
           collapsed && 'md:hidden',
         )}
       >
-        <div className="flex items-center gap-2 p-3">
-          <Button
-            className="flex-1"
-            size="sm"
-            onClick={startNewChat}
-            disabled={createConversation.isPending}
-          >
-            <Plus className="size-4" aria-hidden />
-            New chat
-          </Button>
+        <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
+          <Logo className="pl-1" />
           <Button
             size="icon"
             variant="ghost"
@@ -107,7 +107,7 @@ export function Sidebar({
             ref={collapseButtonRef}
             size="icon"
             variant="ghost"
-            className="hidden md:inline-flex"
+            className="hidden text-muted-foreground md:inline-flex"
             onClick={onCollapse}
             aria-label="Collapse sidebar"
           >
@@ -115,9 +115,33 @@ export function Sidebar({
           </Button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-1">
+        <div className="px-3 pb-3">
+          <Button
+            variant="ink"
+            className="w-full justify-start"
+            onClick={startNewChat}
+            disabled={createConversation.isPending}
+          >
+            <SquarePen className="size-4" aria-hidden />
+            New chat
+          </Button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-2 pb-2">
           {conversations.isPending ? (
-            <p className="px-3 py-2 text-sm text-muted-foreground">Loading conversations…</p>
+            // Skeleton rows hint at the list's shape; the sentence is what a
+            // screen reader hears.
+            <div className="space-y-2 px-2 py-2">
+              <p className="sr-only">Loading conversations…</p>
+              {[72, 56, 64, 48].map((width) => (
+                <div
+                  key={width}
+                  aria-hidden
+                  className="h-8 animate-pulse rounded-lg bg-muted motion-reduce:animate-none"
+                  style={{ width: `${width}%` }}
+                />
+              ))}
+            </div>
           ) : null}
 
           {conversations.isError ? (
@@ -134,22 +158,32 @@ export function Sidebar({
             </div>
           ) : null}
 
-          {!conversations.isPending && items.length === 0 ? (
-            <p className="px-3 py-2 text-sm text-muted-foreground">No conversations yet.</p>
+          {!conversations.isPending && !conversations.isError && items.length === 0 ? (
+            <div className="mx-2 mt-2 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border px-4 py-8 text-center">
+              <MessageSquareDashed className="size-6 text-muted-foreground" aria-hidden />
+              <p className="text-sm text-muted-foreground">No conversations yet.</p>
+            </div>
           ) : null}
 
-          <ul className="space-y-0.5">
-            {items.map((conversation) => (
-              <ConversationItem
-                key={conversation.id}
-                conversation={conversation}
-                isActive={conversation.id === conversationId}
-                onRename={(title) => renameConversation.mutate({ id: conversation.id, title })}
-                onDelete={() => handleDelete(conversation.id)}
-                onNavigate={onClose}
-              />
-            ))}
-          </ul>
+          {groups.map((group) => (
+            <section key={group.label} aria-label={group.label} className="mt-3 first:mt-1">
+              <h2 className="px-2 pb-1 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
+                {group.label}
+              </h2>
+              <ul className="space-y-0.5">
+                {group.items.map((conversation) => (
+                  <ConversationItem
+                    key={conversation.id}
+                    conversation={conversation}
+                    isActive={conversation.id === conversationId}
+                    onRename={(title) => renameConversation.mutate({ id: conversation.id, title })}
+                    onDelete={() => handleDelete(conversation.id)}
+                    onNavigate={onClose}
+                  />
+                ))}
+              </ul>
+            </section>
+          ))}
 
           {conversations.hasNextPage ? (
             <div className="p-2">
@@ -170,14 +204,28 @@ export function Sidebar({
             menu: same actions, no focus-trap or dismissal behaviour to get
             wrong, and it reads fine on mobile. */}
         <div className="border-t border-border p-3">
-          <p className="truncate text-sm font-medium">{user?.display_name}</p>
-          <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
-          <div className="mt-2 flex items-center gap-2">
-            <Button variant="outline" size="sm" className="flex-1" onClick={() => void signOut()}>
-              Sign out
-            </Button>
+          <div className="flex items-center gap-3 rounded-xl p-1.5">
+            <span
+              aria-hidden
+              className="bg-ink flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
+            >
+              {initial}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{user?.display_name}</p>
+              <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
+            </div>
             <ThemeToggle />
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mt-1 w-full justify-start text-muted-foreground"
+            onClick={() => void signOut()}
+          >
+            <LogOut className="size-4" aria-hidden />
+            Sign out
+          </Button>
         </div>
       </nav>
     </>

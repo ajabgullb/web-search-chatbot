@@ -47,7 +47,11 @@ export function ConversationPage() {
       conversation.error instanceof ApiError && conversation.error.is('conversation_not_found')
     return (
       <main className="flex flex-1 items-center justify-center p-6">
-        <Alert variant="error" title={missing ? 'Conversation not found' : 'Something went wrong'}>
+        <Alert
+          variant="error"
+          className="max-w-md"
+          title={missing ? 'Conversation not found' : 'Something went wrong'}
+        >
           {missing
             ? 'It may have been deleted. Pick another conversation from the sidebar.'
             : 'The conversation could not be loaded. Try again in a moment.'}
@@ -66,8 +70,10 @@ export function ConversationPage() {
 
   return (
     <main className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b border-border px-4 py-3">
-        <h1 className="truncate text-sm font-semibold">{conversation.data.title}</h1>
+      <div className="glass sticky top-0 z-10 border-b border-border/70 px-4 py-3">
+        <h1 className="mx-auto max-w-3xl truncate text-sm font-semibold tracking-tight">
+          {conversation.data.title}
+        </h1>
       </div>
 
       <MessageList

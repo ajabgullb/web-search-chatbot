@@ -88,3 +88,33 @@ test('the sidebar collapses on desktop and stays collapsed after a reload', asyn
   await expect(list).toBeVisible()
   await expect(page.getByRole('button', { name: 'Collapse sidebar' })).toBeFocused()
 })
+
+test('a question asked on the chat home opens a new conversation already answering it', async ({
+  page,
+}) => {
+  await register(page, 'home')
+
+  // The home box is focused on arrival: typing is all the page is for.
+  const box = page.getByRole('textbox', { name: 'Message', exact: true })
+  await expect(box).toBeFocused()
+  await box.fill(CITED_QUESTION)
+  await box.press('Enter')
+
+  await expect(page).toHaveURL(/\/chat\/[0-9a-f-]{36}$/)
+  await expect(page.getByLabel('Your message')).toContainText(CITED_QUESTION)
+  await expect(page.getByText(CITED_ANSWER_TEXT)).toBeVisible()
+  // Asked once, so stored once: the optimistic copy was reconciled.
+  await expect(page.getByLabel('Your message')).toHaveCount(1)
+
+  // A suggestion is a question too, in a conversation of its own.
+  await page.goto('/chat')
+  const suggestion = page.getByRole('list', { name: 'Suggestions' }).getByRole('button').first()
+  const prompt = (await suggestion.locator('span > span').last().textContent()) ?? ''
+  await suggestion.click()
+  await expect(page).toHaveURL(/\/chat\/[0-9a-f-]{36}$/)
+  await expect(page.getByLabel('Your message')).toContainText(prompt)
+  await expect(page.getByRole('article', { name: 'Assistant message' })).toBeVisible()
+  await expect(
+    page.getByRole('navigation', { name: 'Conversations' }).getByRole('link'),
+  ).toHaveCount(2)
+})

@@ -7,7 +7,7 @@
  * Shift+Enter still work normally.
  */
 
-import { Paperclip, SendHorizonal, Square } from 'lucide-react'
+import { ArrowUp, Paperclip, Square } from 'lucide-react'
 import { useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, KeyboardEvent, ReactNode } from 'react'
 
@@ -37,6 +37,15 @@ interface ComposerProps {
   accept?: string
   /** Rendered inside the box, above the text: what is attached. */
   attachments?: ReactNode
+  /**
+   * `docked` sits at the foot of a thread; `hero` is the larger, free-standing
+   * box on the chat home, focused on arrival because typing is the one thing
+   * that page is for.
+   */
+  variant?: 'docked' | 'hero'
+  placeholder?: string
+  /** True while the conversation behind a hero send is being created. */
+  busy?: boolean
 }
 
 export function Composer({
@@ -48,7 +57,11 @@ export function Composer({
   attaching = false,
   accept,
   attachments,
+  variant = 'docked',
+  placeholder,
+  busy = false,
 }: ComposerProps) {
+  const hero = variant === 'hero'
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -63,7 +76,7 @@ export function Composer({
 
   const trimmed = value.trim()
   const tooLong = value.length > MAX_MESSAGE_CHARACTERS
-  const canSend = trimmed.length > 0 && !tooLong && !running
+  const canSend = trimmed.length > 0 && !tooLong && !running && !busy
 
   function send() {
     if (!canSend) return
@@ -88,9 +101,24 @@ export function Composer({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="border-t border-border bg-background p-4">
-      <div className="mx-auto flex max-w-3xl flex-col gap-2">
-        <div className="flex flex-col gap-2 rounded-lg border border-input bg-background p-2 focus-within:ring-2 focus-within:ring-ring">
+    <form
+      onSubmit={handleSubmit}
+      className={cn(
+        hero
+          ? 'w-full'
+          : // Fades the thread out behind the box instead of a hard rule.
+            'bg-gradient-to-t from-background from-60% to-transparent px-4 pt-2 pb-4',
+      )}
+    >
+      <div className={cn('mx-auto flex flex-col gap-2', hero ? 'max-w-2xl' : 'max-w-3xl')}>
+        <div
+          className={cn(
+            'flex flex-col gap-2 border border-input bg-card p-2 shadow-sm',
+            'transition-[border-color,box-shadow] duration-200 motion-reduce:transition-none',
+            'focus-within:border-ring/60 focus-within:shadow-glow focus-within:ring-4 focus-within:ring-ring/10',
+            hero ? 'rounded-3xl p-3' : 'rounded-2xl',
+          )}
+        >
           {attachments}
           <div className="flex items-end gap-2">
             {onAttach ? (
@@ -135,31 +163,50 @@ export function Composer({
                 element.style.height = `${Math.min(element.scrollHeight, 200)}px`
               }}
               onKeyDown={handleKeyDown}
-              placeholder={running ? 'Write your next message…' : 'Ask anything…'}
+              placeholder={running ? 'Write your next message…' : (placeholder ?? 'Ask anything…')}
+              // Only the hero box: on the chat home typing is the page's one
+              // task, while a docked box must not steal focus on navigation.
+              autoFocus={hero}
               aria-describedby="composer-help"
               aria-invalid={tooLong || undefined}
-              className="max-h-50 min-h-9 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none"
+              className={cn(
+                'max-h-50 flex-1 resize-none bg-transparent px-1.5 outline-none placeholder:text-muted-foreground/80',
+                hero ? 'min-h-14 py-2 text-base' : 'min-h-9 py-1.5 text-[15px]',
+              )}
             />
             {running ? (
               <Button
                 type="button"
                 size="icon"
                 variant="outline"
+                className="shrink-0 rounded-full"
                 onClick={onStop}
                 disabled={stopping || !onStop}
                 aria-label={stopping ? 'Stopping' : 'Stop answering'}
               >
-                <Square className="size-4 fill-current" aria-hidden />
+                <Square className="size-3.5 fill-current" aria-hidden />
               </Button>
             ) : (
-              <Button type="submit" size="icon" disabled={!canSend} aria-label="Send message">
-                <SendHorizonal className="size-4" aria-hidden />
+              <Button
+                type="submit"
+                size="icon"
+                variant="ink"
+                className={cn(
+                  'shrink-0 rounded-full',
+                  // Grey until there is something to send, so the colour
+                  // itself says "ready".
+                  !canSend && 'bg-none bg-muted text-muted-foreground shadow-none',
+                )}
+                disabled={!canSend}
+                aria-label="Send message"
+              >
+                <ArrowUp className="size-4" strokeWidth={2.5} aria-hidden />
               </Button>
             )}
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-4 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-4 px-2 text-xs text-muted-foreground">
           <p id="composer-help">
             {running
               ? 'The assistant is answering. You can draft your next message, or stop the answer.'

@@ -1,53 +1,100 @@
 @import 'tailwindcss';
+/* Self-hosted: the CSP allows fonts from this origin only (font-src 'self'),
+   so the files are bundled by Vite rather than fetched from a font CDN. */
+@import '@fontsource-variable/inter';
+@import '@fontsource/instrument-serif/400.css';
+@import '@fontsource/instrument-serif/400-italic.css';
 
 /* Design tokens follow the shadcn/ui convention: semantic names in both
    themes so components never hard-code a colour. Dark mode is class-driven
    (`<html class="dark">`) rather than media-driven, so the account menu can
-   offer an explicit choice later. */
+   offer an explicit choice later. A subtree can opt into the dark tokens on
+   its own with `class="dark"`: the brand panels do, in both themes.
+
+   The palette is monochrome: true neutrals (zero chroma) from near-white to
+   near-black. Emphasis comes from contrast, weight, and depth instead of
+   hue. Two exceptions keep their colour on purpose: destructive red, because
+   an error must read as an error at a glance, and syntax highlighting, where
+   colour carries meaning. Text pairs meet WCAG AA in both themes.
+
+   - `--sheen-*`  a black-to-grey (or white-to-grey) gradient for display text.
+   - `--ink-*`    the filled call to action. It inverts with the theme: black
+                  with white text in light mode, white with black text in dark,
+                  so it always stands out from the page.
+   - `--logo-*`   the mark's tile and glyph, inverted the same way. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.17 0 0);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --card-foreground: oklch(0.17 0 0);
+  --primary: oklch(0.2 0 0);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --secondary: oklch(0.955 0 0);
+  --secondary-foreground: oklch(0.25 0 0);
+  --muted: oklch(0.96 0 0);
+  --muted-foreground: oklch(0.47 0 0);
+  --accent: oklch(0.94 0 0);
+  --accent-foreground: oklch(0.2 0 0);
+  --destructive: oklch(0.56 0.22 25);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --radius: 0.625rem;
+  --success: oklch(0.38 0 0);
+  --border: oklch(0.905 0 0);
+  --input: oklch(0.87 0 0);
+  --ring: oklch(0.45 0 0);
+  --radius: 0.75rem;
+
+  --sheen-1: oklch(0.14 0 0);
+  --sheen-2: oklch(0.32 0 0);
+  --sheen-3: oklch(0.52 0 0);
+  --ink-1: oklch(0.13 0 0);
+  --ink-2: oklch(0.32 0 0);
+  --ink-foreground: oklch(0.985 0 0);
+  --logo-1: oklch(0.2 0 0);
+  --logo-2: oklch(0.42 0 0);
+  --logo-ink: oklch(1 0 0);
+  --field: oklch(0.55 0 0 / 22%);
+  --glow: oklch(0 0 0 / 16%);
 }
 
 .dark {
   --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 12%);
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.185 0 0);
+  --card-foreground: oklch(0.97 0 0);
+  --primary: oklch(0.95 0 0);
+  --primary-foreground: oklch(0.15 0 0);
+  --secondary: oklch(0.24 0 0);
+  --secondary-foreground: oklch(0.95 0 0);
+  --muted: oklch(0.22 0 0);
+  --muted-foreground: oklch(0.71 0 0);
+  --accent: oklch(0.26 0 0);
+  --accent-foreground: oklch(0.97 0 0);
+  --destructive: oklch(0.7 0.19 22);
+  --destructive-foreground: oklch(0.15 0 0);
+  --success: oklch(0.82 0 0);
+  --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: oklch(0.75 0 0);
+
+  --sheen-1: oklch(0.99 0 0);
+  --sheen-2: oklch(0.82 0 0);
+  --sheen-3: oklch(0.62 0 0);
+  --ink-1: oklch(0.98 0 0);
+  --ink-2: oklch(0.82 0 0);
+  --ink-foreground: oklch(0.13 0 0);
+  --logo-1: oklch(0.97 0 0);
+  --logo-2: oklch(0.78 0 0);
+  --logo-ink: oklch(0.16 0 0);
+  --field: oklch(1 0 0 / 12%);
+  --glow: oklch(1 0 0 / 7%);
 }
 
 @theme inline {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Instrument Serif', ui-serif, Georgia, serif;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -62,12 +109,71 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
+
+  --animate-rise: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-fade: fade 0.3s ease-out both;
+  --animate-shimmer: shimmer 2.2s linear infinite;
+  --animate-drift: drift 18s ease-in-out infinite alternate;
+  --animate-caret: caret 1s steps(1) infinite;
+  --animate-breathe: breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@keyframes drift {
+  from {
+    transform: translate3d(-4%, -2%, 0) rotate(0deg) scale(1);
+  }
+  to {
+    transform: translate3d(4%, 3%, 0) rotate(8deg) scale(1.08);
+  }
+}
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.82);
+    opacity: 0.65;
+  }
 }
 
 @layer base {
@@ -75,20 +181,134 @@
     @apply border-border outline-ring/50;
   }
 
-  body {
-    @apply bg-background text-foreground antialiased;
+  html {
+    font-feature-settings: 'cv11', 'ss01';
   }
 
-  /* WCAG 2.1 AA: honour the OS reduced-motion preference everywhere. */
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+  }
+
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 25%, transparent);
+  }
+
+  /* WCAG 2.1 AA: honour the OS reduced-motion preference everywhere. Every
+     animation below is decoration, so stopping all of them loses nothing. */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
     *::after {
       animation-duration: 0.01ms !important;
+      animation-delay: 0ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
+  }
+}
+
+@layer components {
+  /* The sheen as text: black fading to grey (white to grey in dark mode).
+     The colour stays the foreground's for forced-colours mode, where
+     background-clip text would vanish. */
+  .text-gradient {
+    background: linear-gradient(100deg, var(--sheen-1), var(--sheen-2) 55%, var(--sheen-3));
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+  }
+  @media (forced-colors: active) {
+    .text-gradient {
+      color: CanvasText;
+      background: none;
+    }
+  }
+
+  /* The filled call to action, with its own text colour: the two invert
+     together with the theme, so the pair always keeps AA contrast. */
+  .bg-ink {
+    background: linear-gradient(135deg, var(--ink-1), var(--ink-2));
+    color: var(--ink-foreground);
+  }
+
+  /* Soft blurred light behind a hero. Purely decorative: the parent marks it
+     aria-hidden, and it sits under the content in its own layer. */
+  .glow-field {
+    position: absolute;
+    inset: -20%;
+    pointer-events: none;
+    background:
+      radial-gradient(40% 35% at 25% 30%, var(--field), transparent 70%),
+      radial-gradient(35% 30% at 75% 25%, var(--field), transparent 70%),
+      radial-gradient(40% 35% at 60% 75%, var(--field), transparent 70%);
+    filter: blur(40px);
+  }
+
+  /* For the box that clips a glow field: fade it out toward the bottom
+     so the clip never shows as a hard horizontal line. */
+  .fade-bottom {
+    mask-image: linear-gradient(to bottom, black 55%, transparent);
+  }
+
+  /* A faint dotted grid that fades out toward the edges. */
+  .dot-grid {
+    background-image: radial-gradient(
+      color-mix(in oklch, var(--foreground) 12%, transparent) 1px,
+      transparent 1px
+    );
+    background-size: 22px 22px;
+    mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  }
+
+  .glass {
+    background: color-mix(in oklch, var(--card) 72%, transparent);
+    backdrop-filter: blur(14px) saturate(1.4);
+  }
+
+  .shadow-glow {
+    box-shadow:
+      0 1px 2px color-mix(in oklch, var(--foreground) 6%, transparent),
+      0 12px 32px -12px var(--glow);
+  }
+
+  /* Status text with a light sweeping across it while the agent works. */
+  .text-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--muted-foreground) 0%,
+      var(--muted-foreground) 40%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 60%,
+      var(--muted-foreground) 100%
+    );
+    background-size: 200% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: var(--animate-shimmer);
+  }
+  @media (forced-colors: active) {
+    .text-shimmer {
+      color: CanvasText;
+      background: none;
+    }
+  }
+
+  /* The blinking block at the end of streamed text: after the last line of
+     the last block, so it sits where the next word will appear. */
+  .stream-caret .prose-chat > :is(p, h1, h2, h3, blockquote):last-child::after,
+  .stream-caret .prose-chat > :is(ul, ol):last-child > li:last-child::after,
+  .stream-caret > p:last-child::after {
+    content: '';
+    display: inline-block;
+    width: 0.5em;
+    height: 1.05em;
+    margin-left: 0.15em;
+    vertical-align: -0.15em;
+    border-radius: 2px;
+    background: var(--primary);
+    animation: var(--animate-caret);
   }
 }
 
@@ -100,7 +320,7 @@
  * dark, and no external CSS file has to be kept in sync with the palette.
  */
 .prose-chat {
-  line-height: 1.65;
+  line-height: 1.7;
 }
 .prose-chat > * + * {
   margin-top: 0.75em;
@@ -136,10 +356,17 @@
 .prose-chat a {
   color: var(--color-primary);
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in oklch, var(--color-primary) 40%, transparent);
+  text-underline-offset: 3px;
+}
+.prose-chat a:hover {
+  text-decoration-color: currentColor;
+}
+.prose-chat strong {
+  font-weight: 650;
 }
 .prose-chat blockquote {
-  border-left: 3px solid var(--color-border);
+  border-left: 3px solid color-mix(in oklch, var(--color-primary) 45%, transparent);
   padding-left: 0.75em;
   color: var(--color-muted-foreground);
 }
@@ -152,7 +379,7 @@
 .prose-chat pre {
   background: var(--color-muted);
   border: 1px solid var(--color-border);
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
   padding: 0.75rem 1rem;
   /* Wide code scrolls inside its own box; the page must never scroll sideways. */
   overflow-x: auto;
@@ -216,37 +443,37 @@
   font-weight: 600;
 }
 
-:root[data-theme='dark'] .hljs-keyword,
-:root[data-theme='dark'] .hljs-selector-tag,
-:root[data-theme='dark'] .hljs-literal,
-:root[data-theme='dark'] .hljs-doctag {
+.dark .hljs-keyword,
+.dark .hljs-selector-tag,
+.dark .hljs-literal,
+.dark .hljs-doctag {
   color: oklch(0.78 0.15 295);
 }
-:root[data-theme='dark'] .hljs-string,
-:root[data-theme='dark'] .hljs-regexp,
-:root[data-theme='dark'] .hljs-addition {
+.dark .hljs-string,
+.dark .hljs-regexp,
+.dark .hljs-addition {
   color: oklch(0.78 0.14 150);
 }
-:root[data-theme='dark'] .hljs-number,
-:root[data-theme='dark'] .hljs-symbol,
-:root[data-theme='dark'] .hljs-bullet {
+.dark .hljs-number,
+.dark .hljs-symbol,
+.dark .hljs-bullet {
   color: oklch(0.8 0.13 60);
 }
-:root[data-theme='dark'] .hljs-title,
-:root[data-theme='dark'] .hljs-section,
-:root[data-theme='dark'] .hljs-name,
-:root[data-theme='dark'] .hljs-attr {
+.dark .hljs-title,
+.dark .hljs-section,
+.dark .hljs-name,
+.dark .hljs-attr {
   color: oklch(0.78 0.12 250);
 }
-:root[data-theme='dark'] .hljs-type,
-:root[data-theme='dark'] .hljs-built_in,
-:root[data-theme='dark'] .hljs-class .hljs-title {
+.dark .hljs-type,
+.dark .hljs-built_in,
+.dark .hljs-class .hljs-title {
   color: oklch(0.8 0.11 200);
 }
 
-/* Inline citation buttons: a compact numbered chip. The <sup> shrinks the
-   text once; the button inherits that rather than shrinking it again, which
-   left the number too small to read or hit. */
+/* Inline citation buttons: a compact numbered chip in the brand tint. The
+   <sup> shrinks the text once; the button inherits that rather than shrinking
+   it again, which left the number too small to read or hit. */
 .citation-marker {
   font-size: 0.72em;
   line-height: 0;
@@ -254,19 +481,23 @@
 }
 .citation-button {
   margin-inline: 0.15em;
-  min-width: 1.5em;
-  border: 1px solid var(--color-border);
-  border-radius: 0.3rem;
-  background: var(--color-muted);
-  padding: 0.05em 0.35em;
+  min-width: 1.6em;
+  border: 1px solid color-mix(in oklch, var(--color-primary) 30%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--color-primary) 12%, transparent);
+  padding: 0.05em 0.45em;
   font-size: 1em;
-  font-weight: 600;
+  font-weight: 650;
   line-height: 1.4;
-  color: var(--color-foreground);
+  color: var(--color-primary);
   cursor: pointer;
+  transition:
+    background-color 0.15s,
+    transform 0.15s;
 }
 .citation-button:hover {
-  background: var(--color-accent);
+  background: color-mix(in oklch, var(--color-primary) 22%, transparent);
+  transform: translateY(-1px);
 }
 .citation-button:focus-visible {
   outline: 2px solid var(--color-ring);

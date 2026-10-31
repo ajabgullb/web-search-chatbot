@@ -38,8 +38,10 @@ export function VerifyEmailBanner() {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-muted px-4 py-2 text-sm">
-      <MailCheck className="size-4 shrink-0" aria-hidden />
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-primary/20 bg-primary/8 px-4 py-2 text-sm">
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+        <MailCheck className="size-4" aria-hidden />
+      </span>
       <p className="min-w-0 flex-1">
         Confirm your email to start chatting. We sent a link to{' '}
         <span className="font-medium">{user.email}</span>.

@@ -70,7 +70,7 @@ export function ConversationItem({
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleRenameKeys}
             onBlur={commitRename}
-            className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="h-9 w-full rounded-lg border border-ring bg-card px-2.5 text-sm ring-4 ring-ring/15 focus-visible:outline-none"
           />
           <Button size="icon" variant="ghost" aria-label="Save name" onMouseDown={commitRename}>
             <Check className="size-4" aria-hidden />
@@ -82,7 +82,7 @@ export function ConversationItem({
 
   if (mode === 'confirming-delete') {
     return (
-      <li className="rounded-md bg-accent px-2 py-2 text-sm">
+      <li className="animate-fade rounded-xl border border-destructive/25 bg-destructive/6 px-2.5 py-2.5 text-sm">
         <p className="mb-2 text-xs">
           Delete <span className="font-medium">{conversation.title}</span>?
         </p>
@@ -92,6 +92,7 @@ export function ConversationItem({
           </Button>
           <Button
             size="sm"
+            className="bg-destructive text-destructive-foreground shadow-none hover:bg-destructive/90"
             aria-label={`Confirm delete ${conversation.title}`}
             onClick={() => {
               setMode('idle')
@@ -112,19 +113,24 @@ export function ConversationItem({
         onClick={onNavigate}
         aria-current={isActive ? 'page' : undefined}
         className={cn(
-          'block truncate rounded-md py-2 pr-16 pl-2 text-sm transition-colors motion-reduce:transition-none',
+          'relative block truncate rounded-lg py-2 pr-16 pl-3 text-sm transition-colors motion-reduce:transition-none',
           'focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-          isActive ? 'bg-accent font-medium' : 'hover:bg-accent/60',
+          // The bar marks the open chat by shape as well as by colour.
+          'before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-primary before:transition-opacity',
+          isActive
+            ? 'bg-card font-medium text-foreground shadow-sm before:opacity-100'
+            : 'text-foreground/80 before:opacity-0 hover:bg-accent/70 hover:text-foreground',
         )}
       >
         {conversation.title}
       </NavLink>
 
       {/* Revealed on hover, but always reachable by keyboard via focus-within. */}
-      <div className="absolute top-1/2 right-1 flex -translate-y-1/2 opacity-0 group-focus-within/item:opacity-100 group-hover/item:opacity-100">
+      <div className="absolute top-1/2 right-1 flex -translate-y-1/2 opacity-0 transition-opacity group-focus-within/item:opacity-100 group-hover/item:opacity-100 motion-reduce:transition-none">
         <Button
           size="icon"
           variant="ghost"
+          className="size-7 rounded-lg text-muted-foreground"
           aria-label={`Rename ${conversation.title}`}
           onClick={() => {
             setDraft(conversation.title)
@@ -136,6 +142,7 @@ export function ConversationItem({
         <Button
           size="icon"
           variant="ghost"
+          className="size-7 rounded-lg text-muted-foreground hover:text-destructive"
           aria-label={`Delete ${conversation.title}`}
           onClick={() => setMode('confirming-delete')}
         >

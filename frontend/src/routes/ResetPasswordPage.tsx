@@ -30,7 +30,10 @@ export function ResetPasswordPage() {
           This link is missing its token. Request a new one and use the most recent email.
         </Alert>
         <p className="mt-6 text-sm">
-          <Link to="/forgot-password" className="underline underline-offset-4">
+          <Link
+            to="/forgot-password"
+            className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground"
+          >
             Request a new link
           </Link>
         </p>
@@ -96,7 +99,7 @@ export function ResetPasswordPage() {
           required
         />
 
-        <Button type="submit" className="w-full" disabled={submitting}>
+        <Button type="submit" variant="ink" size="lg" className="w-full" disabled={submitting}>
           {submitting ? 'Saving…' : 'Save new password'}
         </Button>
       </form>
