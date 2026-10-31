@@ -33,7 +33,7 @@ function StatusIcon({ status }: { status: ChatDocument['status'] | 'uploading' }
   if (status === 'failed') {
     return <CircleAlert className="size-3.5 shrink-0 text-destructive" aria-hidden />
   }
-  return <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+  return <FileText className="size-3.5 shrink-0 text-primary" aria-hidden />
 }
 
 const STATUS_TEXT: Record<ChatDocument['status'] | 'uploading', string> = {
@@ -63,8 +63,9 @@ export function DocumentChips({ attachments, running }: DocumentChipsProps) {
             <li
               key={document.id}
               className={cn(
-                'flex max-w-full items-center gap-1.5 rounded-md border border-border bg-muted py-1 pr-1 pl-2 text-xs',
-                document.status === 'failed' && 'border-destructive/50',
+                'animate-rise flex max-w-full items-center gap-1.5 rounded-xl border border-border bg-muted/70 py-1 pr-1 pl-2 text-xs font-medium',
+                document.status === 'ready' && 'border-primary/25 bg-primary/8',
+                document.status === 'failed' && 'border-destructive/50 bg-destructive/6',
               )}
               title={
                 document.status === 'failed'
@@ -81,14 +82,14 @@ export function DocumentChips({ attachments, running }: DocumentChipsProps) {
                 disabled={running || removingId === document.id}
                 aria-label={`Remove ${document.filename}`}
                 title={running ? 'Wait for the answer to finish' : `Remove ${document.filename}`}
-                className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                className="rounded-md p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
               >
                 <X className="size-3.5" aria-hidden />
               </button>
             </li>
           ))}
           {uploadingName !== null ? (
-            <li className="flex max-w-full items-center gap-1.5 rounded-md border border-dashed border-border px-2 py-1 text-xs text-muted-foreground">
+            <li className="animate-rise flex max-w-full items-center gap-1.5 rounded-xl border border-dashed border-border px-2 py-1 text-xs text-muted-foreground">
               <StatusIcon status="uploading" />
               <span className="max-w-48 truncate">{uploadingName}</span>
               <span className="sr-only">, {STATUS_TEXT.uploading}</span>

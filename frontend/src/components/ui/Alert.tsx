@@ -16,15 +16,15 @@ interface AlertProps {
  */
 export function Alert({ variant = 'error', title, children, className }: AlertProps) {
   const styles = {
-    error: 'border-destructive/40 bg-destructive/10 text-destructive',
-    success: 'border-border bg-muted text-foreground',
-    info: 'border-border bg-muted text-foreground',
+    error: 'border-destructive/30 bg-destructive/8 text-destructive',
+    success: 'border-success/30 bg-success/10 text-foreground',
+    info: 'border-primary/20 bg-primary/6 text-foreground',
   }[variant]
 
   return (
     <div
       role={variant === 'error' ? 'alert' : 'status'}
-      className={cn('rounded-md border px-3 py-2 text-sm', styles, className)}
+      className={cn('animate-fade rounded-xl border px-3.5 py-2.5 text-sm', styles, className)}
     >
       {title ? <p className="font-medium">{title}</p> : null}
       {children}

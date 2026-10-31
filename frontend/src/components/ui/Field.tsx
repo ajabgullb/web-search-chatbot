@@ -32,9 +32,11 @@ export function Field({ label, error, hint, className, ...props }: FieldProps) {
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy || undefined}
         className={cn(
-          'h-10 w-full rounded-md border border-input bg-background px-3 text-sm',
-          'focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-          error && 'border-destructive',
+          'h-11 w-full rounded-xl border border-input bg-card px-3.5 text-sm shadow-xs',
+          'transition-[border-color,box-shadow] duration-150 motion-reduce:transition-none',
+          'placeholder:text-muted-foreground/70 hover:border-ring/50',
+          'focus-visible:border-ring focus-visible:ring-4 focus-visible:ring-ring/20 focus-visible:outline-none',
+          error && 'border-destructive focus-visible:ring-destructive/20',
           className,
         )}
         {...props}
@@ -45,7 +47,7 @@ export function Field({ label, error, hint, className, ...props }: FieldProps) {
         </p>
       ) : null}
       {error ? (
-        <p id={errorId} className="text-sm text-destructive">
+        <p id={errorId} className="animate-fade text-sm text-destructive">
           {error}
         </p>
       ) : null}

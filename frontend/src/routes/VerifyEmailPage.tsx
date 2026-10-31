@@ -62,11 +62,17 @@ export function VerifyEmailPage() {
 
   const next =
     status === 'authenticated' ? (
-      <Link to="/chat" className="underline underline-offset-4">
+      <Link
+        to="/chat"
+        className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground"
+      >
         Start chatting
       </Link>
     ) : (
-      <Link to="/login" className="underline underline-offset-4">
+      <Link
+        to="/login"
+        className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground"
+      >
         Sign in
       </Link>
     )

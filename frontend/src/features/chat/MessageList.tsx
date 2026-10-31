@@ -17,6 +17,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 
 import type { ChatMessage } from '@/api/types'
+import { LogoMark } from '@/components/Logo'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { CopyButton } from '@/features/chat/CopyButton'
@@ -97,7 +98,7 @@ export function MessageList({
       className="relative flex-1 overflow-y-auto"
       data-testid="thread"
     >
-      <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">
+      <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-8 px-4 pt-8 pb-6">
         {hasOlder ? (
           <div className="flex justify-center">
             <Button variant="outline" size="sm" onClick={onLoadOlder} disabled={isLoadingOlder}>
@@ -120,15 +121,28 @@ export function MessageList({
   )
 }
 
-export function UserBubble({ content, children }: { content: string; children?: ReactNode }) {
+/**
+ * `animate` is for the live turn only. A stored message must appear without
+ * motion: it replaces the streamed copy in place when the answer completes,
+ * and fading it in again would make every finished answer blink.
+ */
+export function UserBubble({
+  content,
+  children,
+  animate = false,
+}: {
+  content: string
+  children?: ReactNode
+  animate?: boolean
+}) {
   return (
     <article
       // Each turn is an article with an accessible name, so a screen reader
       // can navigate the thread turn by turn.
       aria-label="Your message"
-      className="group flex flex-col items-end gap-1"
+      className={cn('group flex flex-col items-end gap-1', animate && 'animate-rise')}
     >
-      <div className="max-w-[85ch] rounded-lg bg-primary px-4 py-3 text-sm text-primary-foreground">
+      <div className="max-w-[85%] rounded-3xl rounded-br-lg bg-neutral-900 px-4 py-2.5 text-[15px] leading-relaxed text-white shadow-sm sm:max-w-[75%] dark:bg-neutral-700">
         {/* User text is not Markdown. Rendering it as Markdown would mangle
             whatever the user actually typed. */}
         <p className="break-words whitespace-pre-wrap">{content}</p>
@@ -143,26 +157,28 @@ export function AssistantBubble({
   className,
   label = 'Assistant message',
   busy = false,
+  animate = false,
 }: {
   children: ReactNode
   className?: string
   label?: string
   busy?: boolean
+  animate?: boolean
 }) {
   return (
     <article
       aria-label={label}
       aria-busy={busy || undefined}
-      className="group flex flex-col items-start gap-1"
+      className={cn('group flex gap-3', animate && 'animate-rise')}
     >
-      <div
+      {/* The mark tells the two voices apart by shape, not by colour alone. */}
+      <LogoMark
         className={cn(
-          'w-full max-w-[85ch] rounded-lg border border-border bg-card px-4 py-3 text-sm',
-          className,
+          'mt-0.5 size-7 rounded-lg',
+          busy && 'animate-breathe motion-reduce:animate-none',
         )}
-      >
-        {children}
-      </div>
+      />
+      <div className={cn('min-w-0 flex-1 text-[15px]', className)}>{children}</div>
     </article>
   )
 }
@@ -191,7 +207,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   const anchorPrefix = `msg-${message.id}`
 
   return (
-    <div className="group flex flex-col items-start gap-1">
+    <div className="group flex flex-col gap-1">
       <AssistantBubble>
         <AnswerText content={message.content} citations={citations} anchorPrefix={anchorPrefix} />
         {message.degraded && message.notice ? (
@@ -201,7 +217,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
         ) : null}
         <SourceList citations={citations} anchorPrefix={anchorPrefix} />
       </AssistantBubble>
-      <div className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none">
+      <div className="pl-10 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none">
         <CopyButton value={message.content} />
       </div>
     </div>

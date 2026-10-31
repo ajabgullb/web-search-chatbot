@@ -8,8 +8,9 @@
  * marked, with a way to try again.
  */
 
-import { AlertCircle, FileText, Globe, Loader2, RotateCcw } from 'lucide-react'
+import { AlertCircle, Check, FileText, Globe, LoaderCircle, RotateCcw } from 'lucide-react'
 import { useDeferredValue } from 'react'
+import type { ReactNode } from 'react'
 
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -17,6 +18,7 @@ import { AnswerText, AssistantBubble, UserBubble } from '@/features/chat/Message
 import type { LiveDocuments, LiveRun, LiveSearch } from '@/features/chat/runStore'
 import { isActive } from '@/features/chat/runStore'
 import { SourceList } from '@/features/chat/SourceList'
+import { cn } from '@/lib/utils'
 
 function activityLabel(run: LiveRun): string {
   if (run.stopping) return 'Stopping…'
@@ -34,42 +36,86 @@ function activityLabel(run: LiveRun): string {
   }
 }
 
+/**
+ * One step of the agent's work, as a row in a small timeline: a spinner
+ * while it runs, a check when it is done, a warning if it failed.
+ */
+function Step({
+  state,
+  icon,
+  children,
+}: {
+  state: 'running' | 'done' | 'failed'
+  icon: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <li className="animate-rise flex min-w-0 items-center gap-2">
+      <span
+        aria-hidden
+        className={cn(
+          'flex size-5 shrink-0 items-center justify-center rounded-full',
+          state === 'done' && 'bg-foreground text-background',
+          state === 'failed' && 'bg-destructive/12 text-destructive',
+          state === 'running' && 'bg-primary/12 text-primary',
+        )}
+      >
+        {state === 'running' ? (
+          <LoaderCircle className="size-3 animate-spin motion-reduce:animate-none" />
+        ) : state === 'done' ? (
+          <Check className="size-3" strokeWidth={3} />
+        ) : (
+          <AlertCircle className="size-3" />
+        )}
+      </span>
+      <span aria-hidden className="shrink-0 text-muted-foreground/70">
+        {icon}
+      </span>
+      {children}
+    </li>
+  )
+}
+
 function DocumentProgress({ documents }: { documents: LiveDocuments | null }) {
   if (documents === null) return null
+  const icon = <FileText className="size-3.5" />
+  if (documents.failed) {
+    return (
+      <Step state="failed" icon={icon}>
+        Your documents could not be read for this answer
+      </Step>
+    )
+  }
+  if (documents.documents.length === 0) {
+    return (
+      <Step state="done" icon={icon}>
+        Nothing in your documents matched this question
+      </Step>
+    )
+  }
   return (
-    <ul className="mb-2 flex flex-col gap-1 text-xs text-muted-foreground">
-      {documents.failed ? (
-        <li className="flex items-center gap-1.5">
-          <FileText className="size-3 shrink-0" aria-hidden />
-          Your documents could not be read for this answer
-        </li>
-      ) : documents.documents.length === 0 ? (
-        <li className="flex items-center gap-1.5">
-          <FileText className="size-3 shrink-0" aria-hidden />
-          Nothing in your documents matched this question
-        </li>
-      ) : (
-        documents.documents.map((document) => (
-          <li key={document.document_id} className="flex items-center gap-1.5">
-            <FileText className="size-3 shrink-0" aria-hidden />
-            <span className="truncate">Read {document.filename}</span>
-            <span className="shrink-0">
-              · {document.chunk_count} {document.chunk_count === 1 ? 'passage' : 'passages'}
-            </span>
-          </li>
-        ))
-      )}
-    </ul>
+    <>
+      {documents.documents.map((document) => (
+        <Step key={document.document_id} state="done" icon={icon}>
+          <span className="truncate">Read {document.filename}</span>
+          <span className="shrink-0">
+            · {document.chunk_count} {document.chunk_count === 1 ? 'passage' : 'passages'}
+          </span>
+        </Step>
+      ))}
+    </>
   )
 }
 
 function SearchProgress({ searches }: { searches: LiveSearch[] }) {
-  if (searches.length === 0) return null
   return (
-    <ul className="mb-2 flex flex-col gap-1 text-xs text-muted-foreground">
+    <>
       {searches.map((search, index) => (
-        <li key={`${search.query}-${index}`} className="flex items-center gap-1.5">
-          <Globe className="size-3 shrink-0" aria-hidden />
+        <Step
+          key={`${search.query}-${index}`}
+          state={!search.done ? 'running' : search.failed ? 'failed' : 'done'}
+          icon={<Globe className="size-3.5" />}
+        >
           <span className="truncate">
             {search.done ? 'Searched' : 'Searching'} “{search.query}”
           </span>
@@ -80,9 +126,9 @@ function SearchProgress({ searches }: { searches: LiveSearch[] }) {
                 : `· ${search.sources.length} ${search.sources.length === 1 ? 'source' : 'sources'}`}
             </span>
           ) : null}
-        </li>
+        </Step>
       ))}
-    </ul>
+    </>
   )
 }
 
@@ -111,7 +157,7 @@ export function LiveTurn({ run, onRetry }: LiveTurnProps) {
   return (
     <>
       {run.pendingContent !== null ? (
-        <UserBubble content={run.pendingContent}>
+        <UserBubble content={run.pendingContent} animate>
           {run.phase === 'rejected' ? (
             <div className="flex flex-col items-end gap-1 text-xs">
               <p className="flex items-center gap-1 text-destructive">
@@ -131,19 +177,34 @@ export function LiveTurn({ run, onRetry }: LiveTurnProps) {
         <AssistantBubble
           label={active ? 'Assistant is answering' : 'Assistant message'}
           busy={active}
+          animate
         >
           {active ? (
-            <p className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
-              {activityLabel(run)}
+            <p className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium">
+              <span
+                aria-hidden
+                className="size-1.5 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
+              />
+              <span className="text-shimmer">{activityLabel(run)}</span>
             </p>
           ) : null}
 
-          <DocumentProgress documents={run.documents} />
-          <SearchProgress searches={run.searches} />
+          {run.documents !== null || run.searches.length > 0 ? (
+            <ul className="mb-4 flex flex-col gap-1.5 border-l-2 border-border pl-3 text-xs text-muted-foreground">
+              <DocumentProgress documents={run.documents} />
+              <SearchProgress searches={run.searches} />
+            </ul>
+          ) : null}
 
           {text ? (
-            <div className={active ? undefined : 'opacity-80'}>
+            <div
+              className={cn(
+                // The caret only while words are arriving: thinking and
+                // searching show the status pill instead.
+                active && run.phase === 'streaming' && 'stream-caret',
+                !active && 'opacity-80',
+              )}
+            >
               <AnswerText content={text} citations={run.citations} anchorPrefix={anchorPrefix} />
             </div>
           ) : null}
@@ -164,7 +225,7 @@ export function LiveTurn({ run, onRetry }: LiveTurnProps) {
           ) : null}
 
           {!active && canRetry ? (
-            <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
+            <Button variant="outline" size="sm" className="mt-3 rounded-full" onClick={onRetry}>
               <RotateCcw className="size-3.5" aria-hidden />
               Retry
             </Button>
@@ -180,7 +241,7 @@ export function UnansweredNotice({ onRetry }: { onRetry: () => void }) {
   return (
     <AssistantBubble label="No answer">
       <p className="text-muted-foreground">This message did not get an answer.</p>
-      <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
+      <Button variant="outline" size="sm" className="mt-3 rounded-full" onClick={onRetry}>
         <RotateCcw className="size-3.5" aria-hidden />
         Retry
       </Button>

@@ -10,6 +10,7 @@ import { useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Outlet } from 'react-router'
 
+import { Logo } from '@/components/Logo'
 import { Button } from '@/components/ui/Button'
 import { VerifyEmailBanner } from '@/features/auth/VerifyEmailBanner'
 import { RunStoreProvider } from '@/features/chat/RunStoreProvider'
@@ -72,7 +73,7 @@ export function ChatLayout() {
         <div className="flex min-w-0 flex-1 flex-col">
           <header
             className={cn(
-              'flex items-center gap-2 border-b border-border px-3 py-2',
+              'glass flex items-center gap-2 border-b border-border px-3 py-2',
               !collapsed && 'md:hidden',
             )}
           >
@@ -96,7 +97,7 @@ export function ChatLayout() {
             >
               <PanelLeftOpen className="size-4" aria-hidden />
             </Button>
-            <span className="text-sm font-semibold">Web Search Chatbot</span>
+            <Logo />
           </header>
 
           <VerifyEmailBanner />

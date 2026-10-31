@@ -67,7 +67,10 @@ export function RegisterPage() {
       footer={
         <p>
           Already have an account?{' '}
-          <Link to="/login" className="underline underline-offset-4">
+          <Link
+            to="/login"
+            className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground"
+          >
             Sign in
           </Link>
         </p>
@@ -107,7 +110,7 @@ export function RegisterPage() {
           required
         />
 
-        <Button type="submit" className="w-full" disabled={submitting}>
+        <Button type="submit" variant="ink" size="lg" className="w-full" disabled={submitting}>
           {submitting ? 'Creating account…' : 'Create account'}
         </Button>
       </form>

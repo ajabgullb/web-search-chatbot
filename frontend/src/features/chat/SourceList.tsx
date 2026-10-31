@@ -19,6 +19,22 @@ import { isSafeExternalUrl } from '@/lib/safeUrl'
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
 
+// Grey shades for site monograms, all dark enough for white text. A favicon
+// would need a request to the site (and the CSP allows none); a lettered tile
+// costs nothing, and the shade and letter tell sources apart at a glance.
+const MONOGRAM_SHADES = [0.24, 0.31, 0.38, 0.45, 0.52]
+
+function monogram(citation: Citation): { letter: string; shade: number } {
+  const key = (citation.kind === 'document' ? citation.title : citation.display_url) || '?'
+  const host = key.replace(/^www\./, '')
+  let hash = 0
+  for (const char of host.split('/')[0] ?? host) hash = (hash * 31 + char.charCodeAt(0)) | 0
+  return {
+    letter: (host[0] ?? '?').toUpperCase(),
+    shade: MONOGRAM_SHADES[Math.abs(hash) % MONOGRAM_SHADES.length] ?? 0.24,
+  }
+}
+
 function published(value: string | null | undefined): string | null {
   if (!value) return null
   const date = new Date(value)
@@ -35,11 +51,14 @@ export function SourceList({
   if (citations.length === 0) return null
 
   return (
-    <section aria-label="Sources" className="mt-3 border-t border-border pt-3">
-      <h3 className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+    <section aria-label="Sources" className="mt-5">
+      <h3 className="mb-2.5 flex items-center gap-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
         Sources
+        <span className="rounded-full bg-muted px-1.5 py-px text-[10px] tabular-nums">
+          {citations.length}
+        </span>
       </h3>
-      <ol className="flex flex-col gap-2">
+      <ol className="grid gap-2 sm:grid-cols-2">
         {citations.map((citation) => {
           const isDocument = citation.kind === 'document'
           const date = published(citation.published_at)
@@ -48,24 +67,35 @@ export function SourceList({
                 .filter(Boolean)
                 .join(' · ')
             : [citation.display_url, citation.publisher, date].filter(Boolean).join(' · ')
+          const mark = monogram(citation)
           return (
             <li
               key={citation.source_id}
               id={sourceAnchorId(anchorPrefix, citation.source_id)}
               tabIndex={-1}
-              className="flex gap-2 rounded-md p-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus:bg-accent"
+              className="group/source relative flex gap-2.5 rounded-xl border border-border bg-card p-3 text-xs transition-[border-color,box-shadow,transform] duration-200 outline-none hover:-translate-y-0.5 hover:border-ring/40 hover:shadow-glow focus:border-ring focus:ring-4 focus:ring-ring/20 has-[a:focus-visible]:border-ring has-[a:focus-visible]:ring-4 has-[a:focus-visible]:ring-ring/30 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
             >
-              <span
-                aria-hidden
-                className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded bg-muted font-medium tabular-nums"
-              >
-                {citation.ordinal}
-              </span>
-              <div className="min-w-0">
+              <span aria-hidden className="relative shrink-0 self-start">
                 {isDocument ? (
-                  <span className="inline-flex items-center gap-1 font-medium">
+                  <span className="flex size-7 items-center justify-center rounded-lg bg-primary/12 text-primary">
+                    <FileText className="size-3.5" />
+                  </span>
+                ) : (
+                  <span
+                    className="flex size-7 items-center justify-center rounded-lg text-[11px] font-bold text-white"
+                    style={{ backgroundColor: `oklch(${mark.shade} 0 0)` }}
+                  >
+                    {mark.letter}
+                  </span>
+                )}
+                <span className="absolute -right-1.5 -bottom-1.5 flex size-4 items-center justify-center rounded-full bg-foreground text-[9px] font-bold text-background tabular-nums ring-2 ring-card">
+                  {citation.ordinal}
+                </span>
+              </span>
+              <div className="min-w-0 flex-1">
+                {isDocument ? (
+                  <span className="line-clamp-1 text-[13px] font-medium">
                     <span className="sr-only">Source {citation.ordinal}: </span>
-                    <FileText className="size-3 shrink-0 text-muted-foreground" aria-hidden />
                     {citation.title}
                   </span>
                 ) : citation.url && isSafeExternalUrl(citation.url) ? (
@@ -73,19 +103,26 @@ export function SourceList({
                     href={citation.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 font-medium text-primary underline-offset-2 hover:underline"
+                    // The link's area covers the card (after:inset-0), so the
+                    // whole tile is one click target and one tab stop.
+                    className="line-clamp-1 text-[13px] font-medium text-foreground underline-offset-2 after:absolute after:inset-0 after:rounded-xl group-hover/source:text-primary hover:underline focus-visible:outline-none"
                   >
                     <span className="sr-only">Source {citation.ordinal}: </span>
                     {citation.title}
-                    <ExternalLink className="size-3 shrink-0" aria-hidden />
+                    <ExternalLink
+                      className="ml-1 inline size-3 shrink-0 align-[-1px] opacity-60"
+                      aria-hidden
+                    />
                     <span className="sr-only"> (opens in a new tab)</span>
                   </a>
                 ) : (
-                  <span className="font-medium">{citation.title}</span>
+                  <span className="line-clamp-1 text-[13px] font-medium">{citation.title}</span>
                 )}
-                <p className="truncate text-muted-foreground">{meta}</p>
+                <p className="mt-0.5 truncate text-muted-foreground">{meta}</p>
                 {citation.snippet ? (
-                  <p className="mt-0.5 line-clamp-2 text-muted-foreground">{citation.snippet}</p>
+                  <p className="mt-1.5 line-clamp-2 leading-relaxed text-muted-foreground/90">
+                    {citation.snippet}
+                  </p>
                 ) : null}
               </div>
             </li>
