@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-20.1",
+  "version": "2026-10-31.1",
   "description": "Agent evaluation cases. Each case names what should happen (expect), how the deterministic providers behave in the CI subset (script), and how the live subset runs it (live: null skips it live). Bump the version whenever a case changes, so reports from different datasets are never compared.",
   "cases": [
     {
@@ -271,6 +271,69 @@
         ]
       },
       "live": { "search": "scripted", "rubric": "Says the report does not name the board members and does not invent any. It may mention, with a citation, what the passage does say (a dividend proposal), but must not present it as answering the question." }
+    },
+    {
+      "id": "freshness-summarize-news",
+      "category": "freshness",
+      "question": "Summarize this week's news about the Mars sample return mission.",
+      "expect": { "search": true, "decided_by": "heuristic", "min_citations": 1, "degraded": false },
+      "script": {
+        "answer": "This week the agency confirmed a revised budget for the mission [S1].",
+        "results": [
+          {
+            "url": "https://space.example/news/msr-budget",
+            "title": "Mars sample return: revised budget confirmed",
+            "snippet": "The agency confirmed a revised budget for the mission this week."
+          }
+        ]
+      },
+      "live": { "search": "real", "rubric": "Summarizes recent news about the mission and cites sources, or says clearly that no recent news was found. Does not treat the request as rewriting supplied text." }
+    },
+    {
+      "id": "no-search-ambiguous-word",
+      "category": "no_search",
+      "question": "What is the current in a series circuit with a 12 V battery and two 3 ohm resistors?",
+      "expect": { "search": false, "decided_by": "model", "max_citations": 0 },
+      "script": {
+        "answer": "The total resistance is 6 ohms, so the current is 12 / 6 = 2 A.",
+        "decision": { "should_search": false, "rationale": "stable physics calculation", "queries": [] }
+      },
+      "live": { "search": "real", "rubric": "Computes 2 A from Ohm's law (12 V over 6 ohms). No sources, no claim to have searched." }
+    },
+    {
+      "id": "doc-summarize-it",
+      "category": "document_answer",
+      "question": "Summarize it.",
+      "expect": {
+        "documents": true,
+        "search": false,
+        "decided_by": "heuristic",
+        "min_citations": 1,
+        "citation_kinds": ["document"],
+        "degraded": false
+      },
+      "script": {
+        "answer": "The report says revenue grew 12% in the third quarter, driven by enterprise sales [D1].",
+        "filenames": ["q3-report.pdf"],
+        "documents": [
+          { "content": "Revenue grew 12% in the third quarter, driven by enterprise sales.", "filename": "q3-report.pdf", "page": 3 }
+        ]
+      },
+      "live": { "search": "scripted", "rubric": "Summarizes the attached report from its excerpt and cites it with a D label. Does not say there is nothing to summarize and does not claim to have searched the web." }
+    },
+    {
+      "id": "doc-supplied-text-mentions-report",
+      "category": "no_search",
+      "question": "Rewrite this more formally: hey, can u send me the report by friday?",
+      "expect": { "documents": false, "search": false, "decided_by": "heuristic", "max_citations": 0 },
+      "script": {
+        "answer": "Could you please send me the report by Friday?",
+        "filenames": ["q3-report.pdf"],
+        "documents": [
+          { "content": "Revenue grew 12% in the third quarter, driven by enterprise sales.", "filename": "q3-report.pdf", "page": 3 }
+        ]
+      },
+      "live": { "search": "scripted", "rubric": "A formal rewrite of the supplied sentence. Does not draw on or cite the attached report, which the sentence merely mentions." }
     }
   ]
 }

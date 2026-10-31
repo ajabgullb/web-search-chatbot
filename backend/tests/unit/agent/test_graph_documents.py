@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.agent.events import DocumentsRetrieved, StatusChanged
@@ -113,6 +114,39 @@ class TestReadingDocuments:
         )
         assert documents.queries == []
         assert result.citations == []
+
+    @pytest.mark.parametrize(
+        "question", ["Summarize it", "Can you summarize it?", "translate this"]
+    )
+    async def test_a_text_task_without_its_text_reads_the_documents(
+        self, run: Run, question: str
+    ) -> None:
+        """'Summarize it' right after an upload means the upload. It used to
+        be taken for a task on text already in the chat, and skipped them."""
+        documents = FakeDocumentRetriever(chunks=[REVENUE])
+        search = FakeSearchProvider(default=[hit("https://web.test/x")])
+        result = await run(
+            question,
+            llm=FakeLLM(answers=["The report covers revenue [D1]."]),
+            search=search,
+            documents=documents,
+        )
+        assert result.read_documents is True
+        assert documents.queries
+        assert result.searched is False
+        assert search.queries == []
+        assert [c["source_id"] for c in result.citations] == ["D1"]
+
+    async def test_a_text_task_with_its_text_does_not_read_the_documents(self, run: Run) -> None:
+        documents = FakeDocumentRetriever(chunks=[REVENUE])
+        result = await run(
+            "Rewrite this more formally: hey, can u send me the report by friday?",
+            llm=FakeLLM(answers=["Could you please send me the report by Friday?"]),
+            search=FakeSearchProvider(),
+            documents=documents,
+        )
+        assert result.read_documents is False
+        assert documents.queries == []
 
     async def test_an_invented_document_label_is_discarded(self, run: Run) -> None:
         result = await run(
