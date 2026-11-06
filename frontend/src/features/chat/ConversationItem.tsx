@@ -113,24 +113,35 @@ export function ConversationItem({
         onClick={onNavigate}
         aria-current={isActive ? 'page' : undefined}
         className={cn(
-          'relative block truncate rounded-lg py-2 pr-16 pl-3 text-sm transition-colors motion-reduce:transition-none',
+          'relative block rounded-lg py-2 pr-2 pl-3 text-[13.5px] transition-colors motion-reduce:transition-none',
           'focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-          // The bar marks the open chat by shape as well as by colour.
-          'before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-primary before:transition-opacity',
+          // The bar marks the open chat by shape as well as by shade.
+          'before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-foreground before:transition-opacity',
+          // Opaque fills, so the actions' gradient below can match them.
           isActive
-            ? 'bg-card font-medium text-foreground shadow-sm before:opacity-100'
-            : 'text-foreground/80 before:opacity-0 hover:bg-accent/70 hover:text-foreground',
+            ? 'bg-accent font-medium text-foreground before:opacity-100'
+            : 'text-foreground/75 before:opacity-0 group-focus-within/item:bg-muted group-focus-within/item:text-foreground group-hover/item:bg-muted group-hover/item:text-foreground',
         )}
       >
-        {conversation.title}
+        {/* Full width, fading at the edge; the actions cover the end only
+            while they are shown. */}
+        <span className="text-fade block">{conversation.title}</span>
       </NavLink>
 
-      {/* Revealed on hover, but always reachable by keyboard via focus-within. */}
-      <div className="absolute top-1/2 right-1 flex -translate-y-1/2 opacity-0 transition-opacity group-focus-within/item:opacity-100 group-hover/item:opacity-100 motion-reduce:transition-none">
+      {/* Revealed on hover, but always reachable by keyboard via focus-within.
+          The gradient takes the row's own fill, so the title fades under the
+          buttons instead of being cut by them. */}
+      <div
+        className={cn(
+          'absolute inset-y-0 right-0 flex items-center rounded-r-lg bg-linear-to-l pr-1 pl-6',
+          isActive ? 'from-accent from-70%' : 'from-muted from-70%',
+          'opacity-0 transition-opacity group-focus-within/item:opacity-100 group-hover/item:opacity-100 motion-reduce:transition-none',
+        )}
+      >
         <Button
           size="icon"
           variant="ghost"
-          className="size-7 rounded-lg text-muted-foreground"
+          className="size-7 rounded-lg text-muted-foreground hover:bg-background hover:text-foreground"
           aria-label={`Rename ${conversation.title}`}
           onClick={() => {
             setDraft(conversation.title)
@@ -142,7 +153,7 @@ export function ConversationItem({
         <Button
           size="icon"
           variant="ghost"
-          className="size-7 rounded-lg text-muted-foreground hover:text-destructive"
+          className="size-7 rounded-lg text-muted-foreground hover:bg-background hover:text-destructive"
           aria-label={`Delete ${conversation.title}`}
           onClick={() => setMode('confirming-delete')}
         >
