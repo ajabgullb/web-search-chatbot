@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "postgres": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-c",
+        "exec bash \"$(git rev-parse --show-toplevel)/scripts/mcp/postgres.sh\""
+      ]
+    },
+    "prometheus": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-c",
+        "exec bash \"$(git rev-parse --show-toplevel)/scripts/mcp/prometheus.sh\""
+      ]
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-c",
+        "exec bash \"$(git rev-parse --show-toplevel)/scripts/mcp/playwright.sh\""
+      ]
+    }
+  }
+}

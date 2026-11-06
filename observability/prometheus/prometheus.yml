@@ -12,3 +12,9 @@ scrape_configs:
       # The Compose service name; one dev replica. Several replicas would each
       # need to be listed (or discovered), because each counts only its own work.
       - targets: ['api:8000']
+
+  # MCP usage, counted from Claude Code's telemetry by the collector
+  # (ADR-0018): 8889 is the MCP metrics, 8888 the collector's own counters.
+  - job_name: mcp
+    static_configs:
+      - targets: ['otel-collector:8889', 'otel-collector:8888']

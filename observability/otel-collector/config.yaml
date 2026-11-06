@@ -1,0 +1,259 @@
+# Turns Claude Code's telemetry into the MCP usage metrics Grafana draws
+# (ADR-0018, docs/mcp.md#usage-dashboard).
+#
+# Claude Code pushes OpenTelemetry events and metrics here over OTLP/HTTP.
+# Events can't go straight into Prometheus, so this collector counts them
+# into metrics, and Prometheus scrapes the result on :8889.
+#
+# Privacy is enforced by the connector, not by remembering to delete things.
+# signal_to_metrics builds each output series from the attributes listed
+# below and nothing else. A tool's input (the SQL, the URL), its error
+# message, prompts, and account and session identifiers never become labels,
+# because they aren't listed. tests/unit/test_mcp_dashboard.py fails if any
+# attribute outside the allowlist is added.
+#
+# Only the three servers in .mcp.json are counted. Claude Code reports every
+# MCP server in every project, and names from other projects are dropped
+# here, which also keeps the series count small.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        # Inside the container. Compose publishes it on 127.0.0.1 only.
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 128
+
+  # tool_result and tool_decision put the server and tool names in a JSON
+  # string; mcp_server_connection has its own field. Copy both into the same
+  # two attributes so every metric labels them the same way.
+  transform/mcp_events:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        conditions:
+          - log.attributes["tool_name"] == "mcp_tool" and log.attributes["tool_parameters"] != nil
+        statements:
+          - set(log.cache["params"], ParseJSON(log.attributes["tool_parameters"]))
+          - set(log.attributes["mcp.server"], log.cache["params"]["mcp_server_name"])
+          - set(log.attributes["mcp.tool"], log.cache["params"]["mcp_tool_name"])
+      - context: log
+        conditions:
+          - log.attributes["event.name"] == "mcp_server_connection"
+        statements:
+          - set(log.attributes["mcp.server"], log.attributes["server_name"])
+      # A failed SQL call is reduced to its SQLSTATE: a fixed five-character
+      # code (42501 = permission denied). The message itself can quote values
+      # from the query, so it never leaves this processor.
+      - context: log
+        conditions:
+          - log.attributes["error"] != nil and IsMatch(log.attributes["error"], "SQLSTATE [0-9A-Z]{5}")
+        statements:
+          - set(log.attributes["error.sqlstate"], ExtractPatterns(log.attributes["error"], "SQLSTATE (?P<code>[0-9A-Z]{5})")["code"])
+
+  # Claude Code labels cost and tokens with mcp_server.name; use the same
+  # label name as the event metrics.
+  transform/mcp_cost:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        conditions:
+          - datapoint.attributes["mcp_server.name"] != nil
+        statements:
+          - set(datapoint.attributes["mcp.server"], datapoint.attributes["mcp_server.name"])
+          - set(datapoint.attributes["mcp.tool"], datapoint.attributes["mcp_tool.name"])
+
+  # The connector's deltas carry no start time, so the running total below
+  # would have none either, and Prometheus could not write the 0 that makes a
+  # counter's first increment visible (created-timestamp-zero-ingestion).
+  # Giving each delta a start just before its timestamp fixes that:
+  # delta_to_cumulative keeps the first start as the series' start time.
+  transform/start_time:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        conditions:
+          - datapoint.start_time_unix_nano == 0
+        statements:
+          - set(datapoint.start_time_unix_nano, datapoint.time_unix_nano - 1000000)
+
+  # The connector emits deltas; Prometheus wants running totals. The
+  # collector is the only producer of these series, so their timestamps
+  # always move forward, even when several Claude Code sessions report at once.
+  delta_to_cumulative:
+    max_stale: 24h
+
+connectors:
+  signal_to_metrics:
+    error_mode: ignore
+    logs:
+      - name: mcp.tool.calls
+        description: MCP tool calls that finished, by server, tool and outcome.
+        conditions:
+          - log.attributes["event.name"] == "tool_result" and IsMatch(log.attributes["mcp.server"], "^(postgres|prometheus|playwright)$")
+        include_resource_attributes:
+          - key: service.name
+        attributes:
+          - key: mcp.server
+          - key: mcp.tool
+          - key: success
+        sum:
+          value: '1'
+          monotonic: true
+
+      - name: mcp.tool.duration
+        description: How long an MCP tool call took, as Claude Code measured it.
+        unit: ms
+        conditions:
+          - log.attributes["event.name"] == "tool_result" and IsMatch(log.attributes["mcp.server"], "^(postgres|prometheus|playwright)$")
+        include_resource_attributes:
+          - key: service.name
+        attributes:
+          - key: mcp.server
+          - key: mcp.tool
+        histogram:
+          buckets: [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000]
+          value: Double(log.attributes["duration_ms"])
+
+      - name: mcp.tool.errors
+        description: Failed MCP tool calls by error class (a type name, never the message).
+        conditions:
+          - log.attributes["event.name"] == "tool_result" and log.attributes["success"] == "false" and IsMatch(log.attributes["mcp.server"], "^(postgres|prometheus|playwright)$")
+        include_resource_attributes:
+          - key: service.name
+        attributes:
+          - key: mcp.server
+          - key: mcp.tool
+          - key: error_type
+            default_value: unknown
+        sum:
+          value: '1'
+          monotonic: true
+
+      - name: mcp.postgres.refusals
+        description: SQL the database refused, by SQLSTATE. 42501 means the agent asked for a column grafana_reader may not read.
+        conditions:
+          - log.attributes["event.name"] == "tool_result" and log.attributes["mcp.server"] == "postgres" and log.attributes["error.sqlstate"] != nil
+        include_resource_attributes:
+          - key: service.name
+        attributes:
+          - key: error.sqlstate
+        sum:
+          value: '1'
+          monotonic: true
+
+      - name: mcp.server.connections
+        description: MCP server connection events (connected, failed, disconnected).
+        conditions:
+          - log.attributes["event.name"] == "mcp_server_connection" and IsMatch(log.attributes["mcp.server"], "^(postgres|prometheus|playwright)$")
+        include_resource_attributes:
+          - key: service.name
+        attributes:
+          - key: mcp.server
+          - key: status
+        sum:
+          value: '1'
+          monotonic: true
+
+      - name: mcp.server.startup
+        description: Time from launching an MCP server to a working connection.
+        unit: ms
+        conditions:
+          - log.attributes["event.name"] == "mcp_server_connection" and log.attributes["status"] == "connected" and IsMatch(log.attributes["mcp.server"], "^(postgres|prometheus|playwright)$")
+        include_resource_attributes:
+          - key: service.name
+        attributes:
+          - key: mcp.server
+        histogram:
+          buckets: [250, 500, 1000, 2000, 5000, 10000, 20000, 30000, 60000]
+          value: Double(log.attributes["duration_ms"])
+
+      - name: mcp.tool.decisions
+        description: Permission decisions on MCP tool calls (accept or reject).
+        conditions:
+          - log.attributes["event.name"] == "tool_decision" and IsMatch(log.attributes["mcp.server"], "^(postgres|prometheus|playwright)$")
+        include_resource_attributes:
+          - key: service.name
+        attributes:
+          - key: mcp.server
+          - key: decision
+        sum:
+          value: '1'
+          monotonic: true
+
+    datapoints:
+      # The unit is in the name: as a unit, "USD" would become an upper-case
+      # suffix (mcp_cost_USD_total).
+      - name: mcp.cost.usd
+        description: Claude Code's estimated cost (USD) of model requests attributed to an MCP tool.
+        conditions:
+          - metric.name == "claude_code.cost.usage" and IsMatch(datapoint.attributes["mcp.server"], "^(postgres|prometheus|playwright)$")
+        include_resource_attributes:
+          - key: service.name
+        attributes:
+          - key: mcp.server
+          - key: model
+            default_value: unknown
+        sum:
+          value: datapoint.value_double
+          monotonic: true
+
+      - name: mcp.tokens
+        description: Model tokens attributed to an MCP tool, by token type.
+        conditions:
+          - metric.name == "claude_code.token.usage" and IsMatch(datapoint.attributes["mcp.server"], "^(postgres|prometheus|playwright)$")
+        include_resource_attributes:
+          - key: service.name
+        attributes:
+          - key: mcp.server
+          - key: type
+            default_value: unknown
+        sum:
+          value: Int(datapoint.value_double)
+          monotonic: true
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    # Series that stop updating disappear after this. A counter that comes
+    # back starts again from zero, which rate() and increase() handle.
+    metric_expiration: 24h
+    resource_to_telemetry_conversion:
+      enabled: false
+
+  # Claude Code and other clients may also send traces; nothing here uses them.
+  nop:
+
+service:
+  telemetry:
+    logs:
+      level: warn
+    # The collector's own counters (records received, dropped), scraped by
+    # Prometheus so the dashboard can show whether telemetry is arriving.
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/mcp_events]
+      exporters: [signal_to_metrics]
+    metrics/claude_code:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/mcp_cost]
+      exporters: [signal_to_metrics]
+    metrics/mcp:
+      receivers: [signal_to_metrics]
+      processors: [transform/start_time, delta_to_cumulative]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      exporters: [nop]

@@ -152,6 +152,13 @@ make generate-client  # regenerate ./openapi.json and the typed frontend client
 make down         # stop the stack
 ```
 
+Coding agents get three MCP servers from `.mcp.json`: the database (as the
+read-only `grafana_reader` role), Prometheus, and a browser. Start
+`make dev-observability`, run `make mcp-check` once, and see
+[docs/mcp.md](docs/mcp.md).
+With Claude Code telemetry on, Grafana's **MCP usage** dashboard shows how they're
+used ([docs/mcp.md#usage-dashboard](docs/mcp.md#usage-dashboard)).
+
 ## Testing
 
 No test needs a provider key or a paid API. The LLM and search are replaced
@@ -225,8 +232,10 @@ backend/    FastAPI app (app/), Alembic migrations, tests (incl. load/), agent e
 frontend/   Vite + React app (src/), Playwright e2e (tests/e2e), nginx config
 deploy/     backup and restore scripts used by compose.prod.yaml
 docs/       architecture, API, security, deployment, load testing, ADRs
+scripts/    MCP server launchers for coding agents (scripts/mcp/, see docs/mcp.md)
 compose.yaml  local development stack
 compose.prod.yaml  production-shaped stack (see "Running in production")
+.mcp.json     MCP servers for coding agents (docs/mcp.md)
 Makefile      task runner
 openapi.json  committed API schema; the frontend client is generated from it
 ```
