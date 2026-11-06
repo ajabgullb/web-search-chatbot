@@ -18,6 +18,18 @@ make dev-observability     # the normal stack plus Prometheus and Grafana
 Ports are overridable with `GRAFANA_HOST_PORT` and `PROMETHEUS_HOST_PORT`, and
 bind to `127.0.0.1` only. `make down` stops these services too.
 
+The profile also starts an OpenTelemetry collector for the **MCP usage**
+dashboard. It counts coding agents' MCP tool calls from Claude Code's
+telemetry ([mcp.md](mcp.md#usage-dashboard), ADR-0018).
+
+Prometheus runs with `created-timestamp-zero-ingestion`, which writes a 0 at a
+counter's start time when the exporter publishes one. Without it, a counter
+series that first appears at 1 shows no increase, because `increase()` has
+nothing earlier to compare with. The collector publishes start times. The
+API doesn't yet: `/api/v1/metrics` serves the Prometheus text format, where
+`_created` is just another gauge, so the API's counters still miss their first
+increment.
+
 How the pieces fit: the API counts events in memory, and Prometheus fetches
 those counts every 15 s and stores the history. Grafana asks Prometheus for
 rates and percentiles over time, and asks PostgreSQL for daily totals.
@@ -73,7 +85,9 @@ Grafana reloads the file within 30 s.
 
 **A panel that needs a new database column** fails with `permission denied`
 until the column is added to `observability/postgres/grafana_reader.sql`.
-That's deliberate: think about whether the column is private first. Recreate
+That's deliberate: think about whether the column is private first.
+The `postgres` MCP server logs in as the same role ([mcp.md](mcp.md)), so a
+new grant widens what coding agents can read too. Recreate
 the role with `docker compose --profile observability up grafana-db-reader`.
 
 **A new metric** goes in `backend/app/core/telemetry.py`. Label values must

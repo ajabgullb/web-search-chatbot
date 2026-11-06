@@ -11,7 +11,7 @@ COMPOSE := docker compose
 .PHONY: help dev dev-observability rebuild down logs up-db check-db install migrate migration downgrade \
         test test-backend test-frontend e2e lint lint-backend lint-frontend \
         format format-check typecheck typecheck-backend typecheck-frontend \
-        openapi generate-client clean prod-up prod-down prod-logs prod-backup prod-restore loadtest eval eval-live e2e-install
+        openapi generate-client clean prod-up prod-down prod-logs prod-backup prod-restore loadtest eval eval-live e2e-install mcp-check otel-validate
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -107,6 +107,14 @@ eval: ## Run the deterministic agent evals (free; what CI gates on)
 
 eval-live: ## Run agent evals against the real model and search (costs money)
 	cd $(BACKEND) && uv run python -m evals.run --subset live
+
+mcp-check: ## Start each MCP server in .mcp.json and check it works (needs make dev-observability)
+	python3 scripts/mcp/check.py
+
+otel-validate: ## Check the OpenTelemetry collector config with the pinned collector binary
+	docker run --rm -v "$(CURDIR)/observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro" \
+		$$(sed -n 's/^ *image: \(otel\/opentelemetry-collector-contrib:.*\)/\1/p' compose.yaml) \
+		validate --config=/etc/otelcol-contrib/config.yaml && echo "collector config is valid"
 
 lint: lint-backend lint-frontend ## Lint everything
 

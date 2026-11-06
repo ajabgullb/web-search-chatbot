@@ -1,6 +1,7 @@
-# The committed JSON is the dashboard's source of truth. Grafana will not
-# save UI edits over it: change a panel in the UI, then Export -> JSON and
-# overwrite observability/grafana/dashboards/web-search-chatbot.json.
+# The committed JSON files are the dashboards' source of truth. Grafana will
+# not save UI edits over them: change a panel in the UI, then Export -> JSON
+# and overwrite the file in observability/grafana/dashboards/
+# (web-search-chatbot.json, or mcp-usage.json for the MCP usage dashboard).
 apiVersion: 1
 
 providers:

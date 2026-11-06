@@ -106,6 +106,12 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=15d
+      # A counter's first increment is otherwise invisible: a series that
+      # appears already at 1 has no earlier sample for increase() to compare
+      # with. Exporters that send start times (the OTel collector) get a 0
+      # written at that time. MCP counters are low-volume, so one call per
+      # tool is common and would otherwise read as none (ADR-0018).
+      - --enable-feature=created-timestamp-zero-ingestion
     ports:
       - '127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090'
     volumes:
@@ -118,6 +124,20 @@ services:
       retries: 10
     depends_on:
       - api
+      - otel-collector
+
+  otel-collector:
+    # Receives Claude Code's telemetry and counts MCP tool calls into metrics
+    # for Prometheus (ADR-0018). The image is distroless, with no shell or
+    # HTTP client for a healthcheck; up{job="mcp"} on the dashboard shows it.
+    profiles: [observability]
+    image: otel/opentelemetry-collector-contrib:0.164.0
+    ports:
+      # OTLP/HTTP for Claude Code on this machine only. The metrics ports
+      # (8888, 8889) stay inside the Compose network, scraped by Prometheus.
+      - '127.0.0.1:${OTLP_HTTP_HOST_PORT:-4318}:4318'
+    volumes:
+      - ./observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
 
   grafana-db-reader:
     # One-shot: creates or refreshes Grafana's read-only database login. It

@@ -448,6 +448,21 @@ results per search, per-search and per-run timeouts, and the database pool
 size and checkout timeout. The PDF upload route is the one exception; see
 [Uploaded documents](#uploaded-documents).
 
+## Development MCP servers
+
+`.mcp.json` gives coding agents database, Prometheus, and browser access in
+development only ([mcp.md](mcp.md), ADR-0017). The database server logs in as
+`grafana_reader`, so PostgreSQL, not the tool, keeps message content,
+document text, emails, password hashes, and sessions out of reach.
+`make mcp-check` asserts that refusal. Every server runs over stdio and opens
+no port.
+
+The optional usage dashboard (ADR-0018) receives Claude Code's telemetry on
+`127.0.0.1:4318`. That telemetry includes tool inputs such as SQL, error
+messages, and account identifiers. The collector turns it into metrics with
+an allowlisted label set, so none of that is stored, and a test enforces the
+allowlist.
+
 ## Not yet implemented
 
 A purge policy for soft-deleted conversations and their runs, multi-factor
