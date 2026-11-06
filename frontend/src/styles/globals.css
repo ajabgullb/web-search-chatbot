@@ -251,6 +251,26 @@
     mask-image: linear-gradient(to bottom, black 55%, transparent);
   }
 
+  /* A scrolling list that fades into its frame at both ends, so rows slide
+     under the header and footer instead of being cut off by a hard edge. */
+  .scroll-fade {
+    mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      black 10px,
+      black calc(100% - 20px),
+      transparent
+    );
+  }
+
+  /* One line of text that fades out at the right edge instead of ending in
+     an ellipsis: the whole width is used, and the cut reads as deliberate. */
+  .text-fade {
+    overflow: hidden;
+    white-space: nowrap;
+    mask-image: linear-gradient(to right, black calc(100% - 28px), transparent);
+  }
+
   /* A faint dotted grid that fades out toward the edges. */
   .dot-grid {
     background-image: radial-gradient(
