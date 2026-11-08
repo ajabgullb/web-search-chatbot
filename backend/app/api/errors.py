@@ -251,6 +251,26 @@ class InvalidCursor(AppError):
     message = "The pagination cursor is not valid."
 
 
+class AccessTokenNotFound(NotFound):
+    code = "access_token_not_found"
+    message = "Access token not found."
+
+
+class AccessTokenLimitReached(AppError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "access_token_limit_reached"
+    message = "This account already has the maximum number of access tokens."
+
+
+class InsufficientScope(AppError):
+    """An MCP token without the scope a tool needs. Reported to the MCP
+    client as a tool error, never as an HTTP status (ADR-0019)."""
+
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "insufficient_scope"
+    message = "This access token does not allow that."
+
+
 # Declared on the v1 router so the envelope is part of the published contract
 # and lands in the generated TypeScript client. "default" covers every status
 # not otherwise documented, which is exactly what this envelope does.

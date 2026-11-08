@@ -11,6 +11,7 @@ from app.models.document import Document, DocumentChunk, DocumentStatus
 from app.models.embedding_usage import EmbeddingPurpose, EmbeddingUsage
 from app.models.message import Message, MessageRole, MessageStatus
 from app.models.password_reset_token import PasswordResetToken
+from app.models.personal_access_token import PersonalAccessToken, TokenScope
 from app.models.run import Run, RunStatus
 from app.models.user import User
 
@@ -27,7 +28,9 @@ __all__ = [
     "MessageRole",
     "MessageStatus",
     "PasswordResetToken",
+    "PersonalAccessToken",
     "Run",
     "RunStatus",
+    "TokenScope",
     "User",
 ]

@@ -34,6 +34,12 @@ export type Run = Schemas['RunRead']
 export type RunError = Schemas['RunErrorRead']
 export type RunCreate = Schemas['RunCreate']
 
+export type AccessToken = Schemas['AccessTokenRead']
+export type AccessTokenCreate = Schemas['AccessTokenCreate']
+export type AccessTokenCreated = Schemas['AccessTokenCreated']
+export type AccessTokenList = Schemas['AccessTokenList']
+export type TokenScope = Schemas['TokenScope']
+
 export type ChatDocument = Schemas['DocumentRead']
 export type DocumentList = Schemas['DocumentList']
 export type DocumentStatus = ChatDocument['status']

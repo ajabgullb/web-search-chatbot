@@ -114,7 +114,8 @@ test('a question asked on the chat home opens a new conversation already answeri
   await expect(page).toHaveURL(/\/chat\/[0-9a-f-]{36}$/)
   await expect(page.getByLabel('Your message')).toContainText(prompt)
   await expect(page.getByRole('article', { name: 'Assistant message' })).toBeVisible()
+  // Conversation rows only: the account block below them has a link too.
   await expect(
-    page.getByRole('navigation', { name: 'Conversations' }).getByRole('link'),
+    page.getByRole('navigation', { name: 'Conversations' }).getByRole('listitem').getByRole('link'),
   ).toHaveCount(2)
 })

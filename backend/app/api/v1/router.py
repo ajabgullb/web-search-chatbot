@@ -5,7 +5,16 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.errors import ERROR_RESPONSES
-from app.api.v1 import auth, conversations, documents, health, metrics, runs, users
+from app.api.v1 import (
+    access_tokens,
+    auth,
+    conversations,
+    documents,
+    health,
+    metrics,
+    runs,
+    users,
+)
 
 # Every route can fail with the standard envelope, so it is declared once here
 # rather than repeated on each endpoint.
@@ -14,6 +23,7 @@ api_router.include_router(health.router)
 api_router.include_router(metrics.router)
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
+api_router.include_router(access_tokens.router)
 api_router.include_router(conversations.router)
 api_router.include_router(documents.router)
 api_router.include_router(runs.router)
