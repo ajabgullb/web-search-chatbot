@@ -42,6 +42,7 @@ from app.models.user import User
 from app.providers.email import EmailDeliveryError, EmailPayload, EmailSender
 from app.repositories.auth_sessions import AuthSessionRepository
 from app.repositories.password_reset_tokens import PasswordResetTokenRepository
+from app.repositories.personal_access_tokens import PersonalAccessTokenRepository
 from app.repositories.users import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -321,7 +322,8 @@ class AuthService:
 
         Every existing session is revoked: if the reset was triggered because
         the account was compromised, leaving the attacker's session alive
-        would defeat the point.
+        would defeat the point. Personal access tokens go too (ADR-0019): an
+        attacker who held the account could have minted one.
         """
         now = datetime.now(UTC)
         stored = await self._reset_tokens.get_by_token_hash(hash_opaque_token(token))
@@ -336,11 +338,18 @@ class AuthService:
         user.password_hash = await hash_password(new_password)
         stored.used_at = now
         revoked = await self._sessions.revoke_all_for_user(user.id, at=now)
+        tokens_revoked = await PersonalAccessTokenRepository(self._session).revoke_all_for_user(
+            user_id=user.id, at=now
+        )
 
         await self._session.commit()
         logger.info(
             "password_reset_completed",
-            extra={"user": user_ref(user.id), "sessions_revoked": revoked},
+            extra={
+                "user": user_ref(user.id),
+                "sessions_revoked": revoked,
+                "access_tokens_revoked": tokens_revoked,
+            },
         )
 
     # --- Internals -----------------------------------------------------------

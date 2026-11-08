@@ -22,6 +22,7 @@ from app.agent.context import AgentLimits
 from app.agent.graph import build_graph
 from app.agent.tracing import build_tracing
 from app.api.errors import register_exception_handlers
+from app.api.mcp import McpEndpoint, mount_mcp
 from app.api.middleware import (
     BodyLimitOverride,
     BodySizeLimitMiddleware,
@@ -94,6 +95,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         checkpointer = await stack.enter_async_context(checkpointer_for(settings))
         app.state.checkpointer = checkpointer
         app.state.agent_graph = build_graph(checkpointer)
+        mcp: McpEndpoint | None = app.state.mcp
+        if mcp is not None:
+            # After everything the tools use exists, so it stops first: the
+            # exit stack unwinds before the checkpointer closes.
+            await stack.enter_async_context(mcp.session_manager.run())
         app.state.ingestion.start()
         listener = (
             asyncio.create_task(
@@ -192,6 +198,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
+    # MCP clients (ADR-0019). Built here, not in the lifespan, because routes
+    # must exist before the app starts; its session manager runs there.
+    app.state.mcp = mount_mcp(app, settings) if settings.mcp_enabled else None
     return app
 
 

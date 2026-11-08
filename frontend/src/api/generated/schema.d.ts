@@ -4,6 +4,50 @@
  */
 
 export interface paths {
+    "/api/v1/access-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Access Tokens
+         * @description The caller's tokens that have not been revoked, expired ones included.
+         */
+        get: operations["list_access_tokens_api_v1_access_tokens_get"];
+        put?: never;
+        /**
+         * Create Access Token
+         * @description Mint a token. The response is the only time the token itself is shown.
+         */
+        post: operations["create_access_token_api_v1_access_tokens_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/access-tokens/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke Access Token
+         * @description Revoke a token. Every client using it is refused from its next request.
+         */
+        delete: operations["revoke_access_token_api_v1_access_tokens__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/forgot-password": {
         parameters: {
             query?: never;
@@ -397,6 +441,93 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccessTokenCreate */
+        AccessTokenCreate: {
+            /**
+             * Expires In Days
+             * @description Days until the token stops working. At most ACCESS_TOKEN_MAX_TTL_DAYS.
+             * @default 30
+             */
+            expires_in_days: number;
+            /**
+             * Name
+             * @description A label for the client the token is for, such as 'Claude Desktop'.
+             */
+            name: string;
+            /** Scopes */
+            scopes: components["schemas"]["TokenScope"][];
+        };
+        /** AccessTokenCreated */
+        AccessTokenCreated: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /** Scopes */
+            scopes: components["schemas"]["TokenScope"][];
+            /**
+             * Token
+             * @description The token. Shown in this response only: the server keeps just its hash.
+             */
+            token: string;
+            /**
+             * Token Prefix
+             * @description The token's first characters, to tell tokens apart.
+             */
+            token_prefix: string;
+        };
+        /** AccessTokenList */
+        AccessTokenList: {
+            /** Items */
+            items: components["schemas"]["AccessTokenRead"][];
+        };
+        /**
+         * AccessTokenRead
+         * @description A token as listed. The token itself is never shown again after creation.
+         */
+        AccessTokenRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /** Scopes */
+            scopes: components["schemas"]["TokenScope"][];
+            /**
+             * Token Prefix
+             * @description The token's first characters, to tell tokens apart.
+             */
+            token_prefix: string;
+        };
         /** AgentStatusEvent */
         AgentStatusEvent: {
             /**
@@ -1057,6 +1188,12 @@ export interface components {
             user: components["schemas"]["UserRead"];
         };
         /**
+         * TokenScope
+         * @description What a token may do. Checked by every MCP tool, never by the client.
+         * @enum {string}
+         */
+        TokenScope: "conversations:read" | "runs:create";
+        /**
          * UserRead
          * @description What the API exposes about an account. No password hash, ever.
          */
@@ -1097,6 +1234,97 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_access_tokens_api_v1_access_tokens_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessTokenList"];
+                };
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_access_token_api_v1_access_tokens_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccessTokenCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessTokenCreated"];
+                };
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revoke_access_token_api_v1_access_tokens__token_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     forgot_password_api_v1_auth_forgot_password_post: {
         parameters: {
             query?: never;

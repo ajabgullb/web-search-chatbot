@@ -1,6 +1,179 @@
 {
   "components": {
     "schemas": {
+      "AccessTokenCreate": {
+        "properties": {
+          "expires_in_days": {
+            "default": 30,
+            "description": "Days until the token stops working. At most ACCESS_TOKEN_MAX_TTL_DAYS.",
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Expires In Days",
+            "type": "integer"
+          },
+          "name": {
+            "description": "A label for the client the token is for, such as 'Claude Desktop'.",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/TokenScope"
+            },
+            "maxItems": 2,
+            "minItems": 1,
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "title": "AccessTokenCreate",
+        "type": "object"
+      },
+      "AccessTokenCreated": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/TokenScope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "token": {
+            "description": "The token. Shown in this response only: the server keeps just its hash.",
+            "title": "Token",
+            "type": "string"
+          },
+          "token_prefix": {
+            "description": "The token's first characters, to tell tokens apart.",
+            "title": "Token Prefix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_prefix",
+          "scopes",
+          "expires_at",
+          "last_used_at",
+          "created_at",
+          "token"
+        ],
+        "title": "AccessTokenCreated",
+        "type": "object"
+      },
+      "AccessTokenList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AccessTokenRead"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AccessTokenList",
+        "type": "object"
+      },
+      "AccessTokenRead": {
+        "description": "A token as listed. The token itself is never shown again after creation.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/TokenScope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "token_prefix": {
+            "description": "The token's first characters, to tell tokens apart.",
+            "title": "Token Prefix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_prefix",
+          "scopes",
+          "expires_at",
+          "last_used_at",
+          "created_at"
+        ],
+        "title": "AccessTokenRead",
+        "type": "object"
+      },
       "AgentStatusEvent": {
         "properties": {
           "run_id": {
@@ -1329,6 +1502,15 @@
         "title": "TokenResponse",
         "type": "object"
       },
+      "TokenScope": {
+        "description": "What a token may do. Checked by every MCP tool, never by the client.",
+        "enum": [
+          "conversations:read",
+          "runs:create"
+        ],
+        "title": "TokenScope",
+        "type": "string"
+      },
       "UserRead": {
         "description": "What the API exposes about an account. No password hash, ever.",
         "properties": {
@@ -1400,6 +1582,130 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/access-tokens": {
+      "get": {
+        "description": "The caller's tokens that have not been revoked, expired ones included.",
+        "operationId": "list_access_tokens_api_v1_access_tokens_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error envelope returned for every failure."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Access Tokens",
+        "tags": [
+          "access tokens"
+        ]
+      },
+      "post": {
+        "description": "Mint a token. The response is the only time the token itself is shown.",
+        "operationId": "create_access_token_api_v1_access_tokens_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessTokenCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error envelope returned for every failure."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Access Token",
+        "tags": [
+          "access tokens"
+        ]
+      }
+    },
+    "/api/v1/access-tokens/{token_id}": {
+      "delete": {
+        "description": "Revoke a token. Every client using it is refused from its next request.",
+        "operationId": "revoke_access_token_api_v1_access_tokens__token_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Token Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error envelope returned for every failure."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Access Token",
+        "tags": [
+          "access tokens"
+        ]
+      }
+    },
     "/api/v1/auth/forgot-password": {
       "post": {
         "description": "Always returns the same acknowledgement.\n\nA different status, body, or timing for a known versus unknown address\nwould turn this endpoint into an account-enumeration oracle.",

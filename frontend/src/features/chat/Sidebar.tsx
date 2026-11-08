@@ -6,12 +6,13 @@
  * things to keep in sync.
  */
 
-import { LogOut, MessageSquareDashed, PanelLeftClose, SquarePen, X } from 'lucide-react'
+import { LogOut, MessageSquareDashed, PanelLeftClose, Plug, SquarePen, X } from 'lucide-react'
 import type { Ref } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 
 import { Logo } from '@/components/Logo'
 import { Button } from '@/components/ui/Button'
+import { buttonClasses } from '@/components/ui/buttonVariants'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { ConversationItem } from '@/features/chat/ConversationItem'
 import { groupByRecency } from '@/features/chat/recency'
@@ -219,6 +220,19 @@ export function Sidebar({
               <p className="text-fade text-[13px] font-medium">{user?.display_name}</p>
               <p className="text-fade text-xs text-muted-foreground">{user?.email}</p>
             </div>
+            <Link
+              to="/settings/ai-clients"
+              onClick={onClose}
+              className={buttonClasses({
+                variant: 'ghost',
+                size: 'icon',
+                className: 'text-muted-foreground hover:text-foreground',
+              })}
+              aria-label="AI clients"
+              title="AI clients"
+            >
+              <Plug className="size-4" aria-hidden />
+            </Link>
             <ThemeToggle className="text-muted-foreground hover:text-foreground" />
             <Button
               variant="ghost"

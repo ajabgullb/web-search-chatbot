@@ -79,6 +79,8 @@ _TEXT_REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     # OpenAI-style, Tavily, and LangSmith key shapes.
     (re.compile(r"\b(?:sk|tvly|lsv2)[-_][A-Za-z0-9_-]{8,}"), REDACTED),
+    # Our own personal access tokens (ADR-0019), wherever one turns up.
+    (re.compile(r"\bwsc_pat_[A-Za-z0-9_-]+"), REDACTED),
     (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "[EMAIL]"),
 )
 
@@ -185,4 +187,9 @@ def setup_logging(level: str, *, log_format: str = "json") -> None:
     access.propagate = False
     # HTTP client libraries log every provider call at INFO, full URL included.
     for name in ("httpx", "httpcore", "openai"):
+        logging.getLogger(name).setLevel(max(logging.WARNING, root.level))
+    # The MCP SDK and the SSE library under it log whole JSON-RPC messages at
+    # DEBUG, and those carry questions, answers, and quoted sources. The
+    # endpoint writes its own line per tool call instead (ADR-0019).
+    for name in ("mcp", "sse_starlette"):
         logging.getLogger(name).setLevel(max(logging.WARNING, root.level))

@@ -1,5 +1,6 @@
 import { Route, Routes } from 'react-router'
 
+import { AiClientsPage } from '@/features/aiClients/AiClientsPage'
 import { RedirectIfAuthenticated, RequireAuth } from '@/features/auth/RouteGuards'
 import { ChatLayout } from '@/features/chat/ChatLayout'
 import { ChatPage } from '@/routes/ChatPage'
@@ -40,6 +41,7 @@ export function AppRoutes() {
         <Route element={<ChatLayout />}>
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/chat/:conversationId" element={<ConversationPage />} />
+          <Route path="/settings/ai-clients" element={<AiClientsPage />} />
         </Route>
       </Route>
 

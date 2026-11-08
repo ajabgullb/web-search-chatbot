@@ -188,7 +188,7 @@ class DocumentService:
                 details={"limit": "chunks", "max": self._settings.max_chunks_per_document}
             )
         char_count = sum(len(content) for _, content in chunks)
-        await self._check_quota(user, estimate_tokens(char_count))
+        await self.check_embedding_quota(user, estimate_tokens(char_count))
 
         document = Document(
             id=uuid.uuid4(),
@@ -273,11 +273,13 @@ class DocumentService:
                 details = {"limit": exc.limit, "max": maximum}
             raise error(details=details) from None
 
-    async def _check_quota(self, user: User, needed: int) -> None:
-        """Refuse an upload that would take the user past the daily allowance.
+    async def check_embedding_quota(self, user: User, needed: int) -> None:
+        """Refuse work that would take the user past the daily embedding allowance.
 
         Counts what was spent in the window, what unfinished documents are
-        still expected to spend, and this upload's estimate.
+        still expected to spend, and this request's estimate. Uploads call it,
+        and so does the MCP ``search_documents`` tool (ADR-0019), whose every
+        call embeds a query.
         """
         limit = self._settings.daily_embedding_token_limit_per_user
         now = datetime.now(UTC)
