@@ -280,6 +280,22 @@ class Settings(BaseSettings):
     # Bounds how often the app can be made to mail a single address.
     rate_limit_resend_verification: int = 3
 
+    # --- MCP endpoint and personal access tokens (ADR-0019) ---
+    # Off answers 404 at /api/v1/mcp. Tokens can still be listed and revoked.
+    mcp_enabled: bool = True
+    # MCP requests per token per window, every JSON-RPC message counted. Runs
+    # started through it also count against RATE_LIMIT_RUNS and the daily
+    # allowance, exactly like runs started from the browser.
+    rate_limit_mcp_requests: int = Field(default=120, ge=1)
+    rate_limit_mcp_window_seconds: int = Field(default=60, ge=1)
+    # Requests with a missing or wrong token, per client IP, over
+    # RATE_LIMIT_WINDOW_SECONDS. Guessing a 256-bit token is hopeless anyway;
+    # this keeps a misconfigured client or a scanner from costing a database
+    # lookup per request indefinitely.
+    rate_limit_mcp_auth_failures: int = Field(default=30, ge=1)
+    access_token_max_ttl_days: int = Field(default=90, ge=1, le=365)
+    max_access_tokens_per_user: int = Field(default=10, ge=1)
+
     # --- Email verification ---
     # Unverified accounts can sign in and organise conversations but cannot
     # start runs: a run spends provider money, and accounts on addresses

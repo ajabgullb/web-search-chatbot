@@ -463,6 +463,46 @@ messages, and account identifiers. The collector turns it into metrics with
 an allowlisted label set, so none of that is stored, and a test enforces the
 allowlist.
 
+## MCP endpoint and personal access tokens
+
+`/api/v1/mcp` lets a user's own AI client act on their account
+([mcp-endpoint.md](mcp-endpoint.md), ADR-0019). Its controls:
+
+- **Personal access tokens.** `wsc_pat_` plus 32 CSPRNG bytes, stored only
+  as a SHA-256 like refresh tokens, shown once at creation. Each has scopes
+  (`conversations:read`, `runs:create`), an expiry of at most 90 days, and
+  can be revoked. A password reset revokes all of a user's tokens, and a
+  deactivated account's tokens stop working on the next request, because
+  every request re-checks the account.
+- **Scoped to MCP.** The REST API accepts only the browser JWT, so a PAT
+  cannot mint, list, or revoke tokens, or change the account. The MCP
+  endpoint accepts only PATs, so the browser's session cannot be lifted
+  into a long-lived client either.
+- **Uniform refusals.** An unknown, revoked, or expired token, a JWT, or
+  one belonging to a deactivated account all get the same `401`.
+- **Origin.** A request whose `Origin` is not `FRONTEND_ORIGIN` gets `403`,
+  as the MCP specification requires against DNS rebinding.
+- **Ownership** is the services' own: every tool calls the service the REST
+  route calls, with the token's user, so another user's conversation is
+  "not found" here as everywhere. `ask` gets email verification, both run
+  limits, the run lock, and persistence from `RunService`.
+- **Limits.** Per token (`RATE_LIMIT_MCP_REQUESTS`), per IP for failed
+  token checks (`RATE_LIMIT_MCP_AUTH_FAILURES`), and document searches count
+  against the daily embedding allowance.
+- **Untrusted text, labelled.** Web snippets and PDF passages are returned
+  in `untrusted_*` fields, and the server's instructions tell the client's
+  model they are data. The client's model may control tools with far more
+  reach than ours (a shell, a file system), so the label travels with the
+  text rather than relying on our prompt.
+- **Logs.** One line per tool call: name, outcome, duration, user reference,
+  and token id. Arguments and results are never logged. The MCP SDK and
+  `sse-starlette` log whole messages at DEBUG, so both are held at WARNING,
+  and anything shaped like a PAT is redacted from every log line.
+  `test_log_hygiene` drives an MCP session and searches the output.
+
+Not covered: OAuth for clients that cannot send a header, and per-token IP
+allowlists.
+
 ## Not yet implemented
 
 A purge policy for soft-deleted conversations and their runs, multi-factor

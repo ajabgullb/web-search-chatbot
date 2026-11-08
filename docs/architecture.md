@@ -20,6 +20,13 @@ browser ──▶ frontend (Vite/React, nginx in production)
                 └── Search        behind app/providers/search.py
 ```
 
+An MCP client reaches the same backend at `/api/v1/mcp`
+([mcp-endpoint.md](mcp-endpoint.md)). `app/api/mcp/` is a second adapter
+beside `app/api/v1/`: an ASGI endpoint authenticates a personal access token,
+then the MCP SDK's stateless Streamable HTTP transport dispatches to tools
+that call the same services the REST routes do. `ask` is an ordinary run,
+started through `RunService` and `RunManager`.
+
 ## Backend layering
 
 Each layer may call only the one below it.

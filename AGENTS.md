@@ -21,6 +21,7 @@ The repository is a monorepo with `backend/` and `frontend/` under one root. Fol
 9. Users can stop an in-progress response and retry a failed or stopped response.
 10. Users can never read, alter, or run another user's conversations.
 11. (v2, [ADR-0015](docs/adr/0015-chat-scoped-pdf-retrieval.md)) Users can upload PDF documents to a conversation, see their processing status, and remove them. Answers in that conversation can draw on those documents and cite them by filename and page. A document belongs to exactly one conversation and is never visible from any other.
+12. ([ADR-0019](docs/adr/0019-mcp-endpoint-for-ai-clients.md)) Users can connect their own MCP clients to their account with scoped, expiring, revocable personal access tokens. The MCP endpoint offers `ask`, `list_conversations`, `get_messages`, and `search_documents` over the same services and limits as the REST API, and a token never works anywhere else.
 
 ### Explicit non-goals
 
@@ -166,6 +167,7 @@ Use UUID primary keys, UTC timezone-aware timestamps, foreign keys, useful index
 - `runs`: `id`, `conversation_id`, `user_message_id`, optional `assistant_message_id`, status (`queued`, `running`, `completed`, `failed`, `cancelled`), error code, started/completed timestamps, provider/model, search count, and usage metadata.
 - `citations`: `id`, `message_id`, stable ordinal, `kind` (`web` or `document`), canonical URL (required for web citations), title, optional publisher, snippet, retrieved timestamp, optional published timestamp, and for document citations the chunk reference and page.
 - `documents`: `id`, `user_id`, `conversation_id`, sanitized filename, content SHA-256, size, page/char/chunk counts, status (`processing`, `ready`, `failed`), error code, embedding model and dimensions, embedding token count, ingestion lease, and timestamps. Hard-deleted, never soft-deleted.
+- `personal_access_tokens` (ADR-0019): `id`, `user_id`, `name`, SHA-256 `token_hash`, display `token_prefix`, `scopes`, `expires_at`, `last_used_at`, `revoked_at`, and timestamps.
 - `document_chunks`: `id`, `document_id`, denormalized `user_id` and `conversation_id`, ordinal, page, text, generated full-text `tsvector`, and a nullable embedding vector.
 
 Add unique `(conversation_id, sequence_number)` and indexes for conversation listing, message pagination, active sessions, and run status. All ownership queries must constrain by `user_id` at the database query boundary. A guessed UUID must produce `404`, not reveal whether another user's object exists.
@@ -270,6 +272,8 @@ All endpoints live under `/api/v1`. Use Pydantic request and response models; ne
 - `GET /conversations/{conversation_id}/documents/{document_id}`
 - `DELETE /conversations/{conversation_id}/documents/{document_id}`
 - `POST /runs/{run_id}/cancel`
+- `GET /access-tokens`, `POST /access-tokens`, `DELETE /access-tokens/{token_id}` (ADR-0019)
+- `/mcp` — stateless Streamable HTTP MCP endpoint, personal access tokens only (ADR-0019)
 - `GET /runs/{run_id}` — recovery/polling endpoint
 - `GET /health/live`
 - `GET /health/ready`

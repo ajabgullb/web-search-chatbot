@@ -159,6 +159,12 @@ read-only `grafana_reader` role), Prometheus, and a browser. Start
 With Claude Code telemetry on, Grafana's **MCP usage** dashboard shows how they're
 used ([docs/mcp.md#usage-dashboard](docs/mcp.md#usage-dashboard)).
 
+Users can also connect their own AI clients (Claude Code, Cursor, VS Code) to
+the app itself: **AI clients** in the sidebar mints a personal access token
+for `/api/v1/mcp`, which offers `ask`, `list_conversations`, `get_messages`,
+and `search_documents` over the user's own account. See
+[docs/mcp-endpoint.md](docs/mcp-endpoint.md).
+
 ## Testing
 
 No test needs a provider key or a paid API. The LLM and search are replaced

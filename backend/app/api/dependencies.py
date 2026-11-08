@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import AsyncIterator
-from typing import Annotated, Protocol
+from typing import Annotated, Any, Protocol
 
 from fastapi import Depends, Request
 from fastapi.params import Depends as DependsMarker
@@ -32,6 +32,7 @@ from app.db.session import Database
 from app.models.user import User
 from app.providers.email import EmailSender
 from app.repositories.users import UserRepository
+from app.services.access_tokens import AccessTokenService
 from app.services.auth import AuthService, ClientContext
 from app.services.conversations import ConversationService
 from app.services.documents import DocumentService
@@ -147,6 +148,13 @@ async def get_current_user(
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
 
 
+def get_access_token_service(session: SessionDep, settings: SettingsDep) -> AccessTokenService:
+    return AccessTokenService(session, settings)
+
+
+AccessTokenServiceDep = Annotated[AccessTokenService, Depends(get_access_token_service)]
+
+
 def get_conversation_service(session: SessionDep) -> ConversationService:
     return ConversationService(session)
 
@@ -210,10 +218,12 @@ def get_thread_eraser(request: Request) -> ThreadEraser:
 ThreadEraserDep = Annotated[ThreadEraser, Depends(get_thread_eraser)]
 
 
-def get_agent_runtime(request: Request) -> AgentRuntime:
-    """Resolved per request from app.state, so a test can swap a provider on
-    a running app and the next run uses it."""
-    state = request.app.state
+def agent_runtime_from_state(state: Any) -> AgentRuntime:
+    """What a run needs, read from ``app.state`` at the moment it starts.
+
+    Shared by the REST route and the MCP ``ask`` tool, so both run the agent
+    with exactly the same providers and limits.
+    """
     return AgentRuntime(
         graph=state.agent_graph,
         llm=state.llm_provider,
@@ -224,12 +234,19 @@ def get_agent_runtime(request: Request) -> AgentRuntime:
     )
 
 
+def get_agent_runtime(request: Request) -> AgentRuntime:
+    """Resolved per request from app.state, so a test can swap a provider on
+    a running app and the next run uses it."""
+    return agent_runtime_from_state(request.app.state)
+
+
 AgentRuntimeDep = Annotated[AgentRuntime, Depends(get_agent_runtime)]
 
 
-async def _enforce_limit(
+async def enforce_limit(
     limiter: RateLimiter, *, bucket: str, key: str, limit: int, window_seconds: int
 ) -> None:
+    """Count one attempt against ``bucket:key``; refuse it with a 429 if over."""
     decision = await limiter.hit(f"{bucket}:{key}", limit=limit, window_seconds=window_seconds)
     if not decision.allowed:
         telemetry.record_rate_limited(bucket)
@@ -243,7 +260,7 @@ async def enforce_run_rate_limit(
     current_user: CurrentUserDep, settings: SettingsDep, limiter: RateLimiterDep
 ) -> None:
     """Per-user limit on starting runs — the path that spends provider money."""
-    await _enforce_limit(
+    await enforce_limit(
         limiter,
         bucket="runs",
         key=str(current_user.id),
@@ -256,7 +273,7 @@ async def enforce_document_upload_limit(
     current_user: CurrentUserDep, settings: SettingsDep, limiter: RateLimiterDep
 ) -> None:
     """Per user: every upload costs a parse process and embeddings."""
-    await _enforce_limit(
+    await enforce_limit(
         limiter,
         bucket="document_uploads",
         key=str(current_user.id),
@@ -269,7 +286,7 @@ async def enforce_resend_verification_limit(
     current_user: CurrentUserDep, settings: SettingsDep, limiter: RateLimiterDep
 ) -> None:
     """Per user, not per IP: what it protects is the inbox the mail goes to."""
-    await _enforce_limit(
+    await enforce_limit(
         limiter,
         bucket="resend_verification",
         key=str(current_user.id),
@@ -292,7 +309,7 @@ async def enforce_login_account_limit(
     Argon2 work. The trade-off of any per-account limit: an attacker can keep
     one account's password sign-in throttled. Its existing sessions keep
     working and a password reset still gets through."""
-    await _enforce_limit(
+    await enforce_limit(
         limiter,
         bucket="login_account",
         key=_account_key(email),
@@ -352,7 +369,7 @@ def rate_limit(bucket: str, limit_attribute: str) -> DependsMarker:
         limiter: RateLimiterDep,
     ) -> None:
         client_ip = request.client.host if request.client else "unknown"
-        await _enforce_limit(
+        await enforce_limit(
             limiter,
             bucket=bucket,
             key=client_ip,

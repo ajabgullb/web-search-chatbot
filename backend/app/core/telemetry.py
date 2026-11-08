@@ -119,6 +119,26 @@ DOCUMENT_RETRIEVAL_DURATION = Histogram(
     buckets=_SEARCH_BUCKETS,
 )
 
+# The MCP endpoint (ADR-0019). "mcp_endpoint" rather than "mcp": the dev
+# usage dashboard (ADR-0018) already has mcp_* series, from another job.
+MCP_TOOL_CALLS = Counter(
+    "mcp_endpoint_tool_calls_total",
+    "MCP tool and resource calls by name and outcome: ok, cancelled, error, "
+    "or the error code the call was refused with.",
+    ["tool", "outcome"],
+)
+MCP_TOOL_DURATION = Histogram(
+    "mcp_endpoint_tool_duration_seconds",
+    "MCP tool and resource calls, start to result. ask includes the whole run.",
+    ["tool"],
+    buckets=_RUN_BUCKETS,
+)
+MCP_REFUSALS = Counter(
+    "mcp_endpoint_refusals_total",
+    "MCP requests refused before reaching a tool: unauthenticated, origin, rate_limited.",
+    ["reason"],
+)
+
 DB_POOL_CHECKED_OUT = Gauge("db_pool_connections_in_use", "Database connections checked out.")
 DB_POOL_CAPACITY = Gauge(
     "db_pool_connections_max", "Most connections the pool will open (size + overflow)."
@@ -219,6 +239,15 @@ def record_embedding(purpose: str, outcome: str, seconds: float, tokens: int = 0
 def record_document_retrieval(outcome: str, seconds: float) -> None:
     DOCUMENT_RETRIEVALS.labels(outcome).inc()
     DOCUMENT_RETRIEVAL_DURATION.observe(seconds)
+
+
+def record_mcp_tool(tool: str, outcome: str, seconds: float) -> None:
+    MCP_TOOL_CALLS.labels(tool, outcome).inc()
+    MCP_TOOL_DURATION.labels(tool).observe(seconds)
+
+
+def record_mcp_refused(reason: str) -> None:
+    MCP_REFUSALS.labels(reason).inc()
 
 
 def _sample_pool(database: Database) -> None:

@@ -5,7 +5,8 @@ schema is committed at [`../openapi.json`](../openapi.json) and regenerated with
 `make openapi`.
 
 Status: the complete v1 API: authentication, conversations, messages,
-streaming runs, health, and metrics. `backend/tests/contract` fails if this
+streaming runs, documents, access tokens, the MCP endpoint, health, and
+metrics. `backend/tests/contract` fails if this
 schema and the code drift apart.
 
 ## Conventions
@@ -125,6 +126,42 @@ sign in and manage conversations, but starting a run returns `403
 email_not_verified`. The token is valid for `EMAIL_VERIFICATION_TTL_HOURS`
 (48) and may be used more than once. `resend-verification` is limited per
 account (`RATE_LIMIT_RESEND_VERIFICATION`, 3 per 5 minutes).
+
+### Access tokens
+
+Personal access tokens for MCP clients ([ADR-0019](adr/0019-mcp-endpoint-for-ai-clients.md)).
+These routes take the browser's bearer token. A personal access token is
+refused here, and by every other REST route: it works only at
+[`/api/v1/mcp`](#mcp-endpoint).
+
+| Method | Path | Purpose | Success |
+| --- | --- | --- | --- |
+| GET | `/access-tokens` | The caller's tokens that are not revoked, expired ones included | `200` |
+| POST | `/access-tokens` | Mint a token | `201` |
+| DELETE | `/access-tokens/{token_id}` | Revoke a token | `204` |
+
+```json
+POST /api/v1/access-tokens
+{ "name": "Claude Code", "scopes": ["conversations:read", "runs:create"], "expires_in_days": 30 }
+
+201
+{
+  "id": "...", "name": "Claude Code", "token_prefix": "wsc_pat_AbCd",
+  "scopes": ["conversations:read", "runs:create"],
+  "expires_at": "...", "last_used_at": null, "created_at": "...",
+  "token": "wsc_pat_..."
+}
+```
+
+`token` appears in this response only; the server stores its SHA-256.
+`expires_in_days` is 1 to `ACCESS_TOKEN_MAX_TTL_DAYS` (90). An account holds
+at most `MAX_ACCESS_TOKENS_PER_USER` (10) live tokens. A password reset revokes
+all of them. `last_used_at` is updated at most once a minute.
+
+| Scope | Allows |
+| --- | --- |
+| `conversations:read` | `list_conversations`, `get_messages`, `search_documents`, the `conversation://` resource |
+| `runs:create` | `ask`. Continuing an existing conversation needs `conversations:read` as well |
 
 ### Conversations
 
@@ -358,6 +395,49 @@ saved — only the question remains, ready for `retry_message_id`.
 `status` is `queued`, `running`, `completed`, `failed`, or `cancelled`. `error`
 is set only when `failed`; `cancel_reason` only when `cancelled`.
 
+### MCP endpoint
+
+`/api/v1/mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
+server over Streamable HTTP, in stateless mode, for the user's own AI
+clients. [mcp-endpoint.md](mcp-endpoint.md) explains how to connect one.
+
+- **Authentication.** `Authorization: Bearer wsc_pat_...` on every request.
+  Without a valid token: `401` with `WWW-Authenticate: Bearer realm="mcp"`
+  (plus `error="invalid_token"` when a token was sent). A request with an
+  `Origin` header other than `FRONTEND_ORIGIN` gets `403 origin_not_allowed`.
+- **Limits.** `RATE_LIMIT_MCP_REQUESTS` (120) requests per token per
+  `RATE_LIMIT_MCP_WINDOW_SECONDS` (60), and `RATE_LIMIT_MCP_AUTH_FAILURES` (30)
+  failed token checks per client IP per `RATE_LIMIT_WINDOW_SECONDS`. Both
+  answer `429 rate_limited` with `Retry-After`.
+- **Responses** are server-sent events: progress notifications, then the
+  JSON-RPC result. Send `Accept: application/json, text/event-stream`.
+- **Errors inside a tool** are tool results with `isError: true`, not HTTP
+  statuses. The text is the same message the REST API would return, followed
+  by its code, for example `... (code: daily_quota_exceeded)`. A refused
+  token scope is `insufficient_scope`.
+
+| Tool | Arguments | Returns |
+| --- | --- | --- |
+| `ask` | `question`, optional `conversation_id` | `conversation_id`, `run_id`, `message_id`, `answer`, `sources`, `degraded`, `notice` |
+| `list_conversations` | optional `cursor`, `limit` (1 to 50) | `conversations` (`id`, `title`, `updated_at`), `next_cursor` |
+| `get_messages` | `conversation_id`, optional `before`, `limit` | `messages` oldest first, `next_cursor` for earlier ones |
+| `search_documents` | `conversation_id`, `query` (up to 1,000 characters) | `documents` (filenames), `passages` (`document_id`, `filename`, `page`, `untrusted_text`) |
+
+Each source is `label` (`S1`, `D1`), `kind`, `title`, `url`, `page`, and
+`untrusted_excerpt`. Fields starting `untrusted_` hold text from web pages
+or uploaded files; the server's instructions tell the client's model to treat
+them as data.
+
+The resource template `conversation://{conversation_id}` reads the latest 50
+messages of a conversation as Markdown.
+
+`ask` is a run like any other: it needs a verified email, counts against
+`RATE_LIMIT_RUNS` and `DAILY_RUN_LIMIT_PER_USER`, takes the conversation's run
+lock, and is saved to the conversation. With a progress token it reports
+progress as it goes. Closing the request cancels the run
+(`client_disconnected`). `search_documents` counts against
+`DAILY_EMBEDDING_TOKEN_LIMIT_PER_USER`.
+
 ### Error codes
 
 | Code | Status | Meaning |
@@ -391,4 +471,7 @@ is set only when `failed`; `cancel_reason` only when `cancelled`.
 | `embedding_quota_exceeded` | 429 | The upload would pass `DAILY_EMBEDDING_TOKEN_LIMIT_PER_USER`; `details` has `limit` and `retry_after_seconds` (also `Retry-After`) |
 | `payload_too_large` | 413 | Body over `MAX_REQUEST_BODY_BYTES`; `details.max_bytes` when the size was declared |
 | `service_unavailable` | 503 | A required dependency (Redis for run creation, SMTP for resending a confirmation) is down, or every PDF parse slot is busy; retry shortly |
+| `access_token_not_found` | 404 | Unknown access token, a revoked one, or another user's |
+| `access_token_limit_reached` | 409 | The account already has `MAX_ACCESS_TOKENS_PER_USER` live tokens; `details.limit` |
+| `insufficient_scope` | — | MCP only, in a tool result: the token lacks the scope the tool needs |
 | `internal_error` | 500 | Unexpected failure; quote `request_id` |

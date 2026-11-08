@@ -30,6 +30,7 @@ from tests.integration.conftest import (
     create_conversation,
     register,
 )
+from tests.integration.mcp_support import call_tool, create_token
 from tests.integration.runs_support import install_providers, parse_sse, post_run
 from tests.pdfs import make_pdf
 
@@ -180,3 +181,59 @@ async def test_a_document_session_leaves_no_document_content_in_the_logs(
     for event in ("document_uploaded", "document_ready", "document_search", "document_deleted"):
         assert event in events, f"{event} was not logged"
     assert events["document_uploaded"]["document_id"] == document_id
+
+
+async def test_an_mcp_session_leaves_no_token_or_content_in_the_logs(
+    app: FastAPI, client: AsyncClient, captured_logs: io.StringIO
+) -> None:
+    """ADR-0019: the MCP endpoint logs tool names and outcomes, never what was
+    asked, answered, or searched, and never the token."""
+    await install_providers(
+        app,
+        llm=FakeLLM(
+            answers=["ibex-answer-marker: rates were held [S1]."],
+            decision=SearchDecision(
+                should_search=True, rationale="fresh", queries=["gecko-query-marker"]
+            ),
+        ),
+        search=FakeSearchProvider(
+            default=[hit("https://news.test/r", title="Rates", snippet="lemur-page-marker")]
+        ),
+    )
+    headers = auth_header(await register(client, email="hygiene-mcp@example.com"))
+    token = (await create_token(client, headers))["token"]
+
+    asked = await call_tool(
+        client,
+        token,
+        "ask",
+        {"question": "marmot-question-marker: what did the bank decide?"},
+        progress_token="progress",
+    )
+    await call_tool(
+        client,
+        token,
+        "search_documents",
+        {"conversation_id": asked.structured["conversation_id"], "query": "civet-search-marker"},
+    )
+    await call_tool(client, token, "ask", {"question": ""})  # rejected arguments
+
+    assert asked.structured["answer"].startswith("ibex-answer-marker")
+    output = captured_logs.getvalue()
+    for name, marker in {
+        "access token": token,
+        "question": "marmot-question-marker",
+        "answer": "ibex-answer-marker",
+        "search query": "gecko-query-marker",
+        "page text": "lemur-page-marker",
+        "document search query": "civet-search-marker",
+    }.items():
+        assert marker not in output, f"{name} leaked into the logs"
+
+    lines = [json.loads(line) for line in output.splitlines()]
+    calls = [line for line in lines if line["event"] == "mcp_tool_call"]
+    assert {(line["tool"], line["outcome"]) for line in calls} >= {
+        ("ask", "ok"),
+        ("search_documents", "ok"),
+    }
+    assert all(line["user"] for line in calls)

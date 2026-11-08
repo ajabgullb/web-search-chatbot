@@ -32,6 +32,8 @@ export type ApiErrorCode =
   | 'pdf_too_complex'
   | 'payload_too_large'
   | 'service_unavailable'
+  | 'access_token_not_found'
+  | 'access_token_limit_reached'
 
 /**
  * A failed API call, carrying the server's error envelope.
