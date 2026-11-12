@@ -362,8 +362,10 @@ token.
 Booting with `ENVIRONMENT=production` is refused when:
 
 - `JWT_SECRET` is a known placeholder or under 32 characters;
+- `CREDENTIAL_ENCRYPTION_KEY` is a known placeholder, under 32 characters, or
+  equal to `JWT_SECRET`;
 - `FRONTEND_ORIGIN` contains a wildcard or is not `https`;
-- `LLM_API_KEY`, `SEARCH_API_KEY`, `REDIS_URL`, or `SMTP_HOST` is missing;
+- `SEARCH_API_KEY`, `REDIS_URL`, or `SMTP_HOST` is missing;
 - `DATABASE_URL` uses a stock password (`app`, `postgres`, `password`, …);
 - `METRICS_TOKEN` is set but under 32 characters;
 - `SMTP_SECURITY=none`, because a reset email carries a working credential and
@@ -378,6 +380,11 @@ messages. Production also serves no `/docs` and no `/openapi.json`.
 `tests/integration/test_prod_config.py` starts real processes to check each
 rule and to check that no secret appears in the output. These checks are never
 relaxed to make an environment start.
+
+`LLM_API_KEY` was required until ADR-0020 and is now optional. This was a
+product decision, not a relaxation: without it there is no server model,
+users bring their own keys, and a run is refused with `llm_key_required`
+rather than failing on the provider's 401.
 
 ## Uploaded documents
 
@@ -502,6 +509,40 @@ allowlist.
 
 Not covered: OAuth for clients that cannot send a header, and per-token IP
 allowlists.
+
+## Users' own LLM API keys
+
+A user may save an API key for one of a fixed list of providers
+([ADR-0020](adr/0020-bring-your-own-llm-key.md)). Its controls:
+
+- **Encrypted at rest, bound to its owner.** AES-256-GCM under a key derived
+  (HKDF-SHA256) from `CREDENTIAL_ENCRYPTION_KEY`, a secret separate from
+  `JWT_SECRET`. The owner's user id is the associated data, so a ciphertext
+  moved to another user's row fails to decrypt. A dump of the database
+  without that secret yields no keys; keep the secret out of the backups.
+- **Never shown back.** Responses carry only the last four characters. The
+  request field is a `SecretStr`, validation errors never echo input, and
+  provider exceptions are re-raised without their chain, so a provider's
+  error text (which can quote part of the key) never reaches a log.
+  `test_llm_credentials.py` searches the logs for the key.
+- **No server-side request forgery.** The user picks a preset; the base URL
+  is fixed in code and is always public HTTPS. No user input reaches a URL:
+  the model name matches `^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$` and travels
+  in the request body.
+- **Not a key-testing oracle.** Saving checks the key with one 16-token call.
+  Checks are limited per user (`RATE_LIMIT_LLM_KEY_CHECKS`, 10 an hour), and
+  need a signed-in account.
+- **Browser session only.** The settings routes take the browser JWT. A
+  personal access token works only at `/api/v1/mcp`, so a leaked MCP token
+  cannot read or replace the key. It can still start runs, which use the
+  key, within the run limits.
+- **Never sent to the wrong provider.** Each key is stored against its
+  provider and only ever sent to that provider's URL.
+- **One active model, enforced by the database.** A partial unique index
+  allows one active key per user; switching runs two statements in an order
+  that never violates it, even when two switches race.
+- **Cost.** A user's key pays for their answers. Search and embeddings stay
+  on the operator's keys, so the daily run allowance still applies.
 
 ## Not yet implemented
 

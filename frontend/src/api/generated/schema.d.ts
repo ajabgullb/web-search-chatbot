@@ -437,6 +437,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/me/llm-credentials/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Llm Credential
+         * @description Save (or replace) the key for a provider, after one small call proves
+         *     the key and model work, and switch to it. Nothing is saved on failure.
+         */
+        put: operations["save_llm_credential_api_v1_users_me_llm_credentials__provider__put"];
+        post?: never;
+        /**
+         * Delete Llm Credential
+         * @description Forget the key for a provider. Safe to repeat.
+         */
+        delete: operations["delete_llm_credential_api_v1_users_me_llm_credentials__provider__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/me/llm-selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Select Llm
+         * @description Switch the model answers come from: one of the caller's saved keys
+         *     with a model, or (both null) the app's default. Instant: no provider call.
+         */
+        put: operations["select_llm_api_v1_users_me_llm_selection_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/me/llm-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Llm Settings
+         * @description The providers on offer, the caller's saved keys (described, never
+         *     returned), the server's model, and which model answers next.
+         */
+        get: operations["read_llm_settings_api_v1_users_me_llm_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -778,6 +845,108 @@ export interface components {
              * Format: email
              */
             email: string;
+        };
+        /**
+         * LLMCredentialRead
+         * @description A saved key, described. The key itself is never returned.
+         */
+        LLMCredentialRead: {
+            /** Is Active */
+            is_active: boolean;
+            /**
+             * Key Hint
+             * @description The key's last four characters.
+             */
+            key_hint: string;
+            /**
+             * Model
+             * @description The model last chosen for this provider.
+             */
+            model: string;
+            /** Provider */
+            provider: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Verified At
+             * Format: date-time
+             */
+            verified_at: string;
+        };
+        /**
+         * LLMCredentialWrite
+         * @description Save (or replace) the key for the provider in the path, and use it.
+         */
+        LLMCredentialWrite: {
+            /**
+             * Api Key
+             * Format: password
+             * @description The provider's API key. Never returned.
+             */
+            api_key: string;
+            /** Model */
+            model: string;
+        };
+        /** LLMProviderRead */
+        LLMProviderRead: {
+            /** Default Model */
+            default_model: string;
+            /** Id */
+            id: string;
+            /**
+             * Key Url
+             * @description Where to create an API key for this provider.
+             */
+            key_url: string;
+            /** Label */
+            label: string;
+            /** Suggested Models */
+            suggested_models: string[];
+        };
+        /**
+         * LLMSelectionRead
+         * @description The model the user's next answer will come from.
+         */
+        LLMSelectionRead: {
+            /** Model */
+            model: string;
+            /**
+             * Provider
+             * @description Preset id for a user's key; null for the server's.
+             */
+            provider: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "user" | "server";
+        };
+        /**
+         * LLMSelectionWrite
+         * @description Switch models. Both null picks the app's default model.
+         */
+        LLMSelectionWrite: {
+            /** Model */
+            model?: string | null;
+            /** Provider */
+            provider?: string | null;
+        };
+        /** LLMSettingsRead */
+        LLMSettingsRead: {
+            /**
+             * Credentials
+             * @description The user's saved keys, described.
+             */
+            credentials: components["schemas"]["LLMCredentialRead"][];
+            /** Providers */
+            providers: components["schemas"]["LLMProviderRead"][];
+            /** @description What answers next, or null: no key and no default, so runs are refused. */
+            selection: components["schemas"]["LLMSelectionRead"] | null;
+            /** @description The app's default model, or null if the server has none. */
+            server_model: components["schemas"]["ServerModelRead"] | null;
         };
         /**
          * LivenessResponse
@@ -1144,6 +1313,11 @@ export interface components {
              * @enum {string}
              */
             type: "search.started";
+        };
+        /** ServerModelRead */
+        ServerModelRead: {
+            /** Model */
+            model: string;
         };
         /**
          * SourceRead
@@ -2126,6 +2300,134 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_llm_credential_api_v1_users_me_llm_credentials__provider__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A provider preset id. */
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LLMCredentialWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMSettingsRead"];
+                };
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_llm_credential_api_v1_users_me_llm_credentials__provider__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A provider preset id. */
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    select_llm_api_v1_users_me_llm_selection_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LLMSelectionWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMSettingsRead"];
+                };
+            };
+            /** @description Error envelope returned for every failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_llm_settings_api_v1_users_me_llm_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMSettingsRead"];
                 };
             };
             /** @description Error envelope returned for every failure. */

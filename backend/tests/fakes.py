@@ -7,7 +7,7 @@ import hashlib
 import math
 import re
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from datetime import datetime
 
 from langchain_core.messages import AnyMessage
@@ -19,6 +19,7 @@ from app.core.config import EMBEDDING_VECTOR_DIMENSIONS
 from app.providers.email import EmailPayload
 from app.providers.embeddings import EmbeddingBatch, validate_inputs
 from app.providers.llm import LLMChunk, StructuredT
+from app.providers.llm_catalog import LLMPreset
 from app.providers.search import SearchHit
 
 
@@ -322,3 +323,27 @@ class FakeDocumentRetriever:
             for index, candidate in enumerate(self.chunks)
         ]
         return DocumentSearch(chunks=ranked)
+
+
+class RecordingLLMFactory:
+    """Stands in for ``app.state.llm_factory``: users' keys build fakes (ADR-0020).
+
+    Records every (preset, model, key) it is asked for, so a test can prove
+    which key a check or a run actually used. ``make`` decides what each call
+    returns; by default a fresh :class:`FakeLLM` reporting the chosen model.
+    """
+
+    def __init__(self, make: Callable[[str, str, str], FakeLLM] | None = None) -> None:
+        self._make = make or (lambda _provider, model, _key: FakeLLM(model=model))
+        self.calls: list[tuple[str, str, str]] = []
+        self.built: list[FakeLLM] = []
+
+    def __call__(self, preset: LLMPreset, model: str, api_key: str) -> FakeLLM:
+        self.calls.append((preset.id, model, api_key))
+        llm = self._make(preset.id, model, api_key)
+        self.built.append(llm)
+        return llm
+
+    @property
+    def keys_used(self) -> list[str]:
+        return [key for _provider, _model, key in self.calls]

@@ -130,7 +130,8 @@ async def test_answers_are_counted_by_source_and_tokens_by_model(
     await install_providers(app, llm=FakeLLM(answers=["Hello there."]))
     headers = auth_header(await register(client))
     conversation = await create_conversation(client, headers)
-    model = app.state.settings.llm_model
+    # The model that answered: the server's, as this user saved no key.
+    model = app.state.llm_provider.model
     direct = delta("answers_total", source="direct", degraded="false")
     prompt_tokens = delta("llm_tokens_total", kind="prompt", model=model)
     completion_tokens = delta("llm_tokens_total", kind="completion", model=model)

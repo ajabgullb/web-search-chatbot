@@ -40,6 +40,13 @@ export type AccessTokenCreated = Schemas['AccessTokenCreated']
 export type AccessTokenList = Schemas['AccessTokenList']
 export type TokenScope = Schemas['TokenScope']
 
+export type LlmSettings = Schemas['LLMSettingsRead']
+export type LlmCredential = Schemas['LLMCredentialRead']
+export type LlmCredentialWrite = Schemas['LLMCredentialWrite']
+export type LlmProvider = Schemas['LLMProviderRead']
+export type LlmSelection = Schemas['LLMSelectionRead']
+export type LlmSelectionWrite = Schemas['LLMSelectionWrite']
+
 export type ChatDocument = Schemas['DocumentRead']
 export type DocumentList = Schemas['DocumentList']
 export type DocumentStatus = ChatDocument['status']

@@ -666,6 +666,231 @@
         "title": "ForgotPasswordRequest",
         "type": "object"
       },
+      "LLMCredentialRead": {
+        "description": "A saved key, described. The key itself is never returned.",
+        "properties": {
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "key_hint": {
+            "description": "The key's last four characters.",
+            "title": "Key Hint",
+            "type": "string"
+          },
+          "model": {
+            "description": "The model last chosen for this provider.",
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "verified_at": {
+            "format": "date-time",
+            "title": "Verified At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "model",
+          "key_hint",
+          "is_active",
+          "verified_at",
+          "updated_at"
+        ],
+        "title": "LLMCredentialRead",
+        "type": "object"
+      },
+      "LLMCredentialWrite": {
+        "description": "Save (or replace) the key for the provider in the path, and use it.",
+        "properties": {
+          "api_key": {
+            "description": "The provider's API key. Never returned.",
+            "format": "password",
+            "maxLength": 512,
+            "minLength": 8,
+            "title": "Api Key",
+            "type": "string",
+            "writeOnly": true
+          },
+          "model": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$",
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "api_key"
+        ],
+        "title": "LLMCredentialWrite",
+        "type": "object"
+      },
+      "LLMProviderRead": {
+        "properties": {
+          "default_model": {
+            "title": "Default Model",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "key_url": {
+            "description": "Where to create an API key for this provider.",
+            "title": "Key Url",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "suggested_models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggested Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "default_model",
+          "suggested_models",
+          "key_url"
+        ],
+        "title": "LLMProviderRead",
+        "type": "object"
+      },
+      "LLMSelectionRead": {
+        "description": "The model the user's next answer will come from.",
+        "properties": {
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Preset id for a user's key; null for the server's.",
+            "title": "Provider"
+          },
+          "source": {
+            "enum": [
+              "user",
+              "server"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "provider",
+          "model"
+        ],
+        "title": "LLMSelectionRead",
+        "type": "object"
+      },
+      "LLMSelectionWrite": {
+        "description": "Switch models. Both null picks the app's default model.",
+        "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z0-9_-]{1,32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          }
+        },
+        "title": "LLMSelectionWrite",
+        "type": "object"
+      },
+      "LLMSettingsRead": {
+        "properties": {
+          "credentials": {
+            "description": "The user's saved keys, described.",
+            "items": {
+              "$ref": "#/components/schemas/LLMCredentialRead"
+            },
+            "title": "Credentials",
+            "type": "array"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/LLMProviderRead"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LLMSelectionRead"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What answers next, or null: no key and no default, so runs are refused."
+          },
+          "server_model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServerModelRead"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The app's default model, or null if the server has none."
+          }
+        },
+        "required": [
+          "providers",
+          "credentials",
+          "server_model",
+          "selection"
+        ],
+        "title": "LLMSettingsRead",
+        "type": "object"
+      },
       "LivenessResponse": {
         "description": "Process is up. Deliberately independent of every external dependency.",
         "properties": {
@@ -1416,6 +1641,19 @@
           "query"
         ],
         "title": "SearchStartedEvent",
+        "type": "object"
+      },
+      "ServerModelRead": {
+        "properties": {
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "ServerModelRead",
         "type": "object"
       },
       "SourceRead": {
@@ -2930,6 +3168,193 @@
           }
         ],
         "summary": "Read Current User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/me/llm-credentials/{provider}": {
+      "delete": {
+        "description": "Forget the key for a provider. Safe to repeat.",
+        "operationId": "delete_llm_credential_api_v1_users_me_llm_credentials__provider__delete",
+        "parameters": [
+          {
+            "description": "A provider preset id.",
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "description": "A provider preset id.",
+              "pattern": "^[a-z0-9_-]{1,32}$",
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error envelope returned for every failure."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Llm Credential",
+        "tags": [
+          "users"
+        ]
+      },
+      "put": {
+        "description": "Save (or replace) the key for a provider, after one small call proves\nthe key and model work, and switch to it. Nothing is saved on failure.",
+        "operationId": "save_llm_credential_api_v1_users_me_llm_credentials__provider__put",
+        "parameters": [
+          {
+            "description": "A provider preset id.",
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "description": "A provider preset id.",
+              "pattern": "^[a-z0-9_-]{1,32}$",
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMCredentialWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMSettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error envelope returned for every failure."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Save Llm Credential",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/me/llm-selection": {
+      "put": {
+        "description": "Switch the model answers come from: one of the caller's saved keys\nwith a model, or (both null) the app's default. Instant: no provider call.",
+        "operationId": "select_llm_api_v1_users_me_llm_selection_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMSelectionWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMSettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error envelope returned for every failure."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Select Llm",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/me/llm-settings": {
+      "get": {
+        "description": "The providers on offer, the caller's saved keys (described, never\nreturned), the server's model, and which model answers next.",
+        "operationId": "read_llm_settings_api_v1_users_me_llm_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMSettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error envelope returned for every failure."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Llm Settings",
         "tags": [
           "users"
         ]

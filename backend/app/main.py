@@ -31,6 +31,7 @@ from app.api.middleware import (
 )
 from app.api.v1.router import api_router
 from app.core.config import Settings, get_settings
+from app.core.crypto import SecretBox
 from app.core.logging import setup_logging
 from app.core.rate_limit import build_rate_limiter
 from app.core.redis import build_redis_client
@@ -39,7 +40,7 @@ from app.core.run_signals import RedisCancelSignal
 from app.db.session import Database
 from app.providers.email import build_email_sender
 from app.providers.embeddings import build_embedding_provider
-from app.providers.llm import build_llm_provider
+from app.providers.llm import build_llm_provider, build_user_llm
 from app.providers.search import build_search_provider
 from app.services.ingestion import IngestionManager
 from app.services.pdf import PdfParser
@@ -63,7 +64,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Provider clients and the compiled graph are built once here. A graph
     # compiled per request would rebuild its node table on every message, and a
     # provider client per request would open a new connection pool each time.
+    # None when LLM_API_KEY is empty: there is no server model, and every
+    # user brings their own key (ADR-0020).
     app.state.llm_provider = build_llm_provider(settings)
+    # Users' own keys: the cipher that stores them, and how a run turns one
+    # into a client. A test swaps the factory to keep providers fake.
+    app.state.secret_box = SecretBox(settings.credential_encryption_key)
+    app.state.llm_factory = lambda preset, model, api_key: build_user_llm(
+        preset, model=model, api_key=api_key, settings=settings
+    )
     app.state.search_provider = build_search_provider(settings)
     app.state.agent_limits = AgentLimits.from_settings(settings)
     app.state.tracing = build_tracing(settings)

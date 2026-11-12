@@ -51,7 +51,13 @@ from app.agent.state import AgentState, Citation, RunError, Source, trim_history
 from app.agent.tools.documents import retrieval_query, to_sources
 from app.agent.tools.search import execute_searches, validate_queries
 from app.core import telemetry
-from app.providers.llm import LLMAuthError, LLMError, LLMTransientError
+from app.providers.llm import (
+    LLMAuthError,
+    LLMError,
+    LLMKeyRejected,
+    LLMModelUnavailable,
+    LLMTransientError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +112,21 @@ def _last_user_message(messages: list[AnyMessage]) -> str:
 
 def _llm_error(exc: LLMError) -> RunError:
     telemetry.record_llm_failure("transient" if isinstance(exc, LLMTransientError) else "permanent")
+    if isinstance(exc, LLMKeyRejected):
+        # The user's own key (ADR-0020): theirs to fix, so the message says
+        # how, and it is not an operator warning.
+        logger.info("llm_user_key_rejected")
+        return RunError(
+            code="llm_key_rejected",
+            message="Your AI provider rejected your API key. Update it in AI provider settings.",
+            retryable=False,
+        )
+    if isinstance(exc, LLMModelUnavailable):
+        return RunError(
+            code="llm_model_unavailable",
+            message="Your AI provider could not run the selected model. Choose another model.",
+            retryable=False,
+        )
     if isinstance(exc, LLMAuthError):
         # A warning, with its own event name, because nothing but an operator
         # fixes it — and because a stale key in a long-running container is

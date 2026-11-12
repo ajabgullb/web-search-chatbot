@@ -49,6 +49,13 @@ _ERROR_MESSAGES: dict[str, str] = {
     # Deliberately vague about why: a user cannot fix a server's API key, and
     # the precise cause belongs in the operator's log, not on the screen.
     "llm_auth_failed": "The assistant is misconfigured and cannot answer right now.",
+    # The user's own key (ADR-0020): unlike the server's, they can fix it.
+    "llm_model_unavailable": (
+        "Your AI provider could not run the selected model. Choose another model."
+    ),
+    "llm_key_rejected": (
+        "Your AI provider rejected your API key. Update it in AI provider settings."
+    ),
     "search_unavailable": "Web search is unavailable. Please try again.",
     "run_timeout": "The assistant took too long to answer. Please try again.",
     "run_interrupted": "The answer was interrupted before it finished. Please try again.",

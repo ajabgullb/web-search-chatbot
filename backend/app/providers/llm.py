@@ -1,11 +1,13 @@
 """Chat completion, behind an interface.
 
-One implementation ships: an OpenAI-compatible endpoint reached through
-``langchain-openai``. The base URL is configuration, so the same class serves
-OpenAI, OpenRouter, Groq, or a local Ollama.
+Two clients sit behind it: an OpenAI-compatible endpoint reached through
+``langchain-openai`` (the base URL is configuration, so the same client serves
+OpenAI, OpenRouter, Groq, Gemini, or a local Ollama), and Anthropic's native
+API through ``langchain-anthropic``. Either may be the server's own model or a
+user's, built from the key they saved (ADR-0020).
 
-Nothing above this module may import ``langchain_openai`` or handle a provider
-exception type. Failures leave here as :class:`LLMTransientError` (worth one
+Nothing above this module may import a LangChain provider package or handle a
+provider exception type. Failures leave here as :class:`LLMTransientError` (worth one
 retry) or :class:`LLMPermanentError` (retrying only burns quota).
 """
 
@@ -14,12 +16,13 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from langchain_core.messages import AnyMessage
 from pydantic import BaseModel
 
 from app.core.config import Settings
+from app.providers.llm_catalog import LLMPreset, StructuredMethod
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +60,21 @@ class LLMAuthError(LLMPermanentError):
 
     Split out from other permanent failures because the fix is an operator's,
     not a user's: an outage clears up on its own, a revoked key never does.
+    """
+
+
+class LLMKeyRejected(LLMAuthError):
+    """The provider rejected a key a *user* saved.
+
+    Unlike :class:`LLMAuthError`, the user can fix this one, so the run says
+    so plainly and nothing is logged as an operator problem.
+    """
+
+
+class LLMModelUnavailable(LLMPermanentError):
+    """A user's provider answered 404: usually a model name it does not have.
+
+    Users type model names, so this is theirs to fix by picking another.
     """
 
 
@@ -114,39 +132,48 @@ def classify_llm_error(exc: Exception) -> LLMError:
     return LLMPermanentError(f"llm call failed: {type(exc).__name__}")
 
 
-class OpenAICompatibleLLM:
-    """Chat completions against any OpenAI-compatible ``/v1`` endpoint."""
+class LangChainLLM:
+    """Any LangChain chat model, adapted to :class:`LLMProvider`.
 
-    def __init__(self, settings: Settings) -> None:
-        # Imported lazily so that a test suite using the fake provider does not
-        # pay the import cost of the whole LangChain OpenAI stack.
-        from langchain_openai import ChatOpenAI
+    The provider-specific part is only how the client is constructed; the
+    streaming, structured output, and error classification are the same.
+    """
 
-        self._model = settings.llm_model
-        self._max_output_tokens = settings.llm_max_output_tokens
-        self._client = ChatOpenAI(
-            model=settings.llm_model,
-            api_key=settings.llm_api_key or "not-set",
-            base_url=settings.llm_base_url,
-            timeout=settings.llm_timeout_seconds,
-            temperature=settings.llm_temperature,
-            max_tokens=settings.llm_max_output_tokens,
-            max_retries=0,  # retries are the graph's decision, not the SDK's
-            # Ask for token usage on the final streamed chunk. Without it a
-            # streamed answer has no usage at all, and cost goes unrecorded.
-            stream_usage=True,
-        )
+    def __init__(
+        self,
+        client: Any,
+        *,
+        model: str,
+        max_output_tokens: int,
+        structured_method: StructuredMethod | None = None,
+        user_key: bool = False,
+    ) -> None:
+        self._client = client
+        self._model = model
+        self._max_output_tokens = max_output_tokens
+        # None keeps LangChain's default for the client.
+        self._structured_method = structured_method
+        self._user_key = user_key
 
     @property
     def model(self) -> str:
         return self._model
+
+    def _classify(self, exc: Exception) -> LLMError:
+        error = classify_llm_error(exc)
+        if self._user_key:
+            if isinstance(error, LLMAuthError):
+                return LLMKeyRejected(str(error))
+            if getattr(exc, "status_code", None) == 404:
+                return LLMModelUnavailable(str(error))
+        return error
 
     async def stream(
         self, messages: Sequence[AnyMessage], *, max_output_tokens: int | None = None
     ) -> AsyncIterator[LLMChunk]:
         client = self._client
         if max_output_tokens is not None and max_output_tokens != self._max_output_tokens:
-            client = client.bind(max_tokens=max_output_tokens)  # type: ignore[assignment]
+            client = client.bind(max_tokens=max_output_tokens)
         try:
             async for chunk in client.astream(list(messages)):
                 usage = getattr(chunk, "usage_metadata", None) or {}
@@ -158,18 +185,112 @@ class OpenAICompatibleLLM:
         except Exception as exc:  # re-raised as our own type below
             # A failure mid-stream is classified exactly like one before the
             # first token: the caller decides what a partial answer is worth.
-            raise classify_llm_error(exc) from exc
+            raise self._classify(exc) from exc
 
     async def structured(
         self, messages: Sequence[AnyMessage], schema: type[StructuredT]
     ) -> StructuredT:
+        kwargs: dict[str, Any] = {}
+        if self._structured_method is not None:
+            kwargs["method"] = self._structured_method
         try:
-            result = await self._client.with_structured_output(schema).ainvoke(list(messages))
+            result = await self._client.with_structured_output(schema, **kwargs).ainvoke(
+                list(messages)
+            )
         except Exception as exc:  # re-raised as our own type below
-            raise classify_llm_error(exc) from exc
+            raise self._classify(exc) from exc
         if not isinstance(result, schema):
             raise LLMPermanentError(f"model did not return {schema.__name__}")
         return result
+
+
+def _openai_client(
+    *,
+    model: str,
+    api_key: str,
+    base_url: str,
+    timeout: float,
+    max_output_tokens: int,
+    temperature: float | None,
+) -> Any:
+    # Imported lazily so that a test suite using the fake provider does not
+    # pay the import cost of the whole LangChain OpenAI stack.
+    from langchain_openai import ChatOpenAI
+
+    return ChatOpenAI(
+        model=model,
+        api_key=api_key or "not-set",
+        base_url=base_url,
+        timeout=timeout,
+        temperature=temperature,
+        max_tokens=max_output_tokens,
+        max_retries=0,  # retries are the graph's decision, not the SDK's
+        # Ask for token usage on the final streamed chunk. Without it a
+        # streamed answer has no usage at all, and cost goes unrecorded.
+        stream_usage=True,
+    )
+
+
+class OpenAICompatibleLLM(LangChainLLM):
+    """The server's own model: chat completions against any OpenAI-compatible
+    ``/v1`` endpoint, configured from ``LLM_*`` settings."""
+
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(
+            _openai_client(
+                model=settings.llm_model,
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_base_url,
+                timeout=settings.llm_timeout_seconds,
+                max_output_tokens=settings.llm_max_output_tokens,
+                temperature=settings.llm_temperature,
+            ),
+            model=settings.llm_model,
+            max_output_tokens=settings.llm_max_output_tokens,
+        )
+
+
+def build_user_llm(
+    preset: LLMPreset, *, model: str, api_key: str, settings: Settings
+) -> LLMProvider:
+    """A model reached with a key a user saved.
+
+    Built per run. That is cheap: both LangChain packages share one HTTP
+    connection pool per base URL across instances, so this opens no new pool.
+
+    No temperature is sent. The server's ``LLM_TEMPERATURE`` was chosen for
+    its own model, and some models a user may pick (OpenAI's reasoning
+    models among them) reject any temperature but their default.
+    """
+    client: Any
+    if preset.kind == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+
+        client = ChatAnthropic(
+            model=model,
+            api_key=api_key,
+            base_url=preset.base_url,
+            timeout=settings.llm_timeout_seconds,
+            max_tokens=settings.llm_max_output_tokens,
+            max_retries=0,
+            stream_usage=True,
+        )
+    else:
+        client = _openai_client(
+            model=model,
+            api_key=api_key,
+            base_url=preset.base_url,
+            timeout=settings.llm_timeout_seconds,
+            max_output_tokens=settings.llm_max_output_tokens,
+            temperature=None,
+        )
+    return LangChainLLM(
+        client,
+        model=model,
+        max_output_tokens=settings.llm_max_output_tokens,
+        structured_method=preset.structured_method,
+        user_key=True,
+    )
 
 
 def _text_of(response: object) -> str:
@@ -192,9 +313,17 @@ def _text_of(response: object) -> str:
     return str(content)
 
 
-def build_llm_provider(settings: Settings) -> LLMProvider:
+def build_llm_provider(settings: Settings) -> LLMProvider | None:
+    """The server's own model, or None when ``LLM_API_KEY`` is empty.
+
+    None is a supported configuration (ADR-0020): users then bring their own
+    keys, and a user without one is asked for a key instead of getting a run
+    that fails on the provider's 401.
+    """
     if settings.llm_provider != "openai_compatible":
         raise ValueError(
             f"Unsupported LLM_PROVIDER {settings.llm_provider!r}; only 'openai_compatible' exists"
         )
+    if not settings.llm_api_key:
+        return None
     return OpenAICompatibleLLM(settings)

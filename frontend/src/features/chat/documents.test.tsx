@@ -79,9 +79,10 @@ describe('attaching a PDF', () => {
     const button = await openConversation()
 
     const textbox = screen.getByLabelText(/^message$/i)
-    // Same bordered box: the nearest common container holds both.
+    // Same bordered box: the text on top, the toolbar holding the button
+    // under it.
     expect(button.closest('form')).toBe(textbox.closest('form'))
-    expect(button.parentElement).toBe(textbox.parentElement)
+    expect(button.parentElement?.parentElement).toBe(textbox.parentElement)
   })
 
   it('uploads the file as multipart and shows it until it is ready', async () => {

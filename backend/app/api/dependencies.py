@@ -36,6 +36,7 @@ from app.services.access_tokens import AccessTokenService
 from app.services.auth import AuthService, ClientContext
 from app.services.conversations import ConversationService
 from app.services.documents import DocumentService
+from app.services.llm_credentials import LLMCredentialService, ResolvedLLM
 from app.services.run_executor import AgentRuntime, RunManager
 from app.services.runs import RunService
 
@@ -204,6 +205,24 @@ def get_document_service(
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 
 
+def llm_credential_service_from_state(
+    state: Any, session: AsyncSession, settings: Settings
+) -> LLMCredentialService:
+    """Shared by the REST routes and the MCP ``ask`` tool (ADR-0020)."""
+    return LLMCredentialService(session, settings, box=state.secret_box, factory=state.llm_factory)
+
+
+def get_llm_credential_service(
+    request: Request, session: SessionDep, settings: SettingsDep
+) -> LLMCredentialService:
+    """Resolved per request from app.state, so a test can swap the factory
+    on a running app and no test ever reaches a real provider."""
+    return llm_credential_service_from_state(request.app.state, session, settings)
+
+
+LLMCredentialServiceDep = Annotated[LLMCredentialService, Depends(get_llm_credential_service)]
+
+
 class ThreadEraser(Protocol):
     """The one checkpointer operation the API calls: erasing a thread."""
 
@@ -218,29 +237,23 @@ def get_thread_eraser(request: Request) -> ThreadEraser:
 ThreadEraserDep = Annotated[ThreadEraser, Depends(get_thread_eraser)]
 
 
-def agent_runtime_from_state(state: Any) -> AgentRuntime:
+def agent_runtime_from_state(state: Any, llm: ResolvedLLM) -> AgentRuntime:
     """What a run needs, read from ``app.state`` at the moment it starts.
 
-    Shared by the REST route and the MCP ``ask`` tool, so both run the agent
-    with exactly the same providers and limits.
+    Read per run, so a test can swap a provider on a running app and the next
+    run uses it. The model is the one chosen for this user (ADR-0020): their
+    own key, or the server's. Shared by the REST route and the MCP ``ask``
+    tool, so both run the agent with exactly the same providers and limits.
     """
     return AgentRuntime(
         graph=state.agent_graph,
-        llm=state.llm_provider,
+        llm=llm.provider,
         search=state.search_provider,
         limits=state.agent_limits,
         tracing=state.tracing,
         documents=state.document_retriever,
+        metrics_model=llm.metrics_label,
     )
-
-
-def get_agent_runtime(request: Request) -> AgentRuntime:
-    """Resolved per request from app.state, so a test can swap a provider on
-    a running app and the next run uses it."""
-    return agent_runtime_from_state(request.app.state)
-
-
-AgentRuntimeDep = Annotated[AgentRuntime, Depends(get_agent_runtime)]
 
 
 async def enforce_limit(
@@ -266,6 +279,20 @@ async def enforce_run_rate_limit(
         key=str(current_user.id),
         limit=settings.rate_limit_runs,
         window_seconds=settings.rate_limit_runs_window_seconds,
+    )
+
+
+async def enforce_llm_key_check_limit(
+    current_user: CurrentUserDep, settings: SettingsDep, limiter: RateLimiterDep
+) -> None:
+    """Per user: each save calls the provider with the key (ADR-0020). Without
+    a limit the endpoint would be a free oracle for testing stolen keys."""
+    await enforce_limit(
+        limiter,
+        bucket="llm_key_checks",
+        key=str(current_user.id),
+        limit=settings.rate_limit_llm_key_checks,
+        window_seconds=settings.rate_limit_llm_key_checks_window_seconds,
     )
 
 

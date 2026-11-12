@@ -11,9 +11,11 @@
 import { AlertCircle, Check, FileText, Globe, LoaderCircle, RotateCcw } from 'lucide-react'
 import { useDeferredValue } from 'react'
 import type { ReactNode } from 'react'
+import { Link } from 'react-router'
 
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
+import { AI_PROVIDER_PATH, LLM_KEY_ERROR_CODES } from '@/features/aiProvider/queries'
 import { AnswerText, AssistantBubble, UserBubble } from '@/features/chat/MessageList'
 import type { LiveDocuments, LiveRun, LiveSearch } from '@/features/chat/runStore'
 import { isActive } from '@/features/chat/runStore'
@@ -137,6 +139,16 @@ interface LiveTurnProps {
   onRetry: () => void
 }
 
+/** For failures the user fixes with their API key (ADR-0020). */
+function KeySettingsLink({ code }: { code: string | undefined }) {
+  if (code === undefined || !LLM_KEY_ERROR_CODES.has(code)) return null
+  return (
+    <Link to={AI_PROVIDER_PATH} className="font-medium underline underline-offset-2">
+      Open AI provider settings
+    </Link>
+  )
+}
+
 export function LiveTurn({ run, onRetry }: LiveTurnProps) {
   // Markdown re-parses on every delta. Deferring the text lets React skip
   // intermediate renders under load instead of letting typing lag behind.
@@ -164,6 +176,7 @@ export function LiveTurn({ run, onRetry }: LiveTurnProps) {
                 <AlertCircle className="size-3.5" aria-hidden />
                 Not sent. {run.error?.message}
               </p>
+              <KeySettingsLink code={run.error?.code} />
               <Button variant="outline" size="sm" onClick={onRetry}>
                 <RotateCcw className="size-3.5" aria-hidden />
                 Try again
@@ -213,7 +226,7 @@ export function LiveTurn({ run, onRetry }: LiveTurnProps) {
 
           {run.phase === 'failed' ? (
             <Alert variant="error" className="mt-3" title="The answer failed">
-              {run.error?.message}
+              {run.error?.message} <KeySettingsLink code={run.error?.code} />
             </Alert>
           ) : null}
           {run.phase === 'cancelled' ? (

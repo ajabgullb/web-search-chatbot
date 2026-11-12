@@ -13,11 +13,12 @@ from fastapi import APIRouter, Depends, Header, Request
 from starlette.responses import Response
 
 from app.api.dependencies import (
-    AgentRuntimeDep,
     CurrentUserDep,
+    LLMCredentialServiceDep,
     RunManagerDep,
     RunServiceDep,
     SettingsDep,
+    agent_runtime_from_state,
     enforce_run_rate_limit,
 )
 from app.api.errors import ServiceUnavailable
@@ -150,7 +151,7 @@ async def create_run(
     current_user: CurrentUserDep,
     service: RunServiceDep,
     manager: RunManagerDep,
-    runtime: AgentRuntimeDep,
+    llm_credentials: LLMCredentialServiceDep,
     settings: SettingsDep,
     idempotency_key: Annotated[
         str,
@@ -168,11 +169,18 @@ async def create_run(
         raise ServiceUnavailable(
             "The server is restarting. Try again in a moment.", headers={"Retry-After": "5"}
         )
+    # The user's own key, else the server's model, else None (ADR-0020).
+    # Decided before anything is stored, so a user with no model is asked for
+    # a key instead of getting a question that can never be answered.
+    llm = await llm_credentials.resolve(
+        user_id=current_user.id, server_llm=request.app.state.llm_provider
+    )
     outcome = await service.create(
         user=current_user,
         conversation_id=conversation_id,
         payload=payload,
         idempotency_key=idempotency_key,
+        llm=llm,
     )
     if isinstance(outcome, ReplayedRun):
         return EventStreamResponse(
@@ -180,10 +188,12 @@ async def create_run(
             headers={"Idempotent-Replayed": "true"},
         )
 
+    # Not None: create() refuses a new run without a model.
+    assert llm is not None
     handle = manager.start(
         run=outcome.run,
         user_message=outcome.user_message,
-        runtime=runtime,
+        runtime=agent_runtime_from_state(request.app.state, llm),
         request_id=getattr(request.state, "request_id", None),
     )
 

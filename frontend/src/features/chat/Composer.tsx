@@ -46,6 +46,12 @@ interface ComposerProps {
   placeholder?: string
   /** True while the conversation behind a hero send is being created. */
   busy?: boolean
+  /**
+   * Rendered in the toolbar under the text: the model picker. A slot rather
+   * than a dependency, so the composer stays a plain input with no data of
+   * its own.
+   */
+  modelPicker?: ReactNode
 }
 
 export function Composer({
@@ -60,6 +66,7 @@ export function Composer({
   variant = 'docked',
   placeholder,
   busy = false,
+  modelPicker,
 }: ComposerProps) {
   const hero = variant === 'hero'
   const [value, setValue] = useState('')
@@ -120,7 +127,37 @@ export function Composer({
           )}
         >
           {attachments}
-          <div className="flex items-end gap-2">
+          <label htmlFor="composer" className="sr-only">
+            Message
+          </label>
+          <textarea
+            id="composer"
+            ref={textareaRef}
+            rows={1}
+            value={value}
+            onChange={(event) => {
+              setValue(event.target.value)
+              // Grow with the content up to a ceiling, then scroll.
+              const element = event.target
+              element.style.height = 'auto'
+              element.style.height = `${Math.min(element.scrollHeight, 200)}px`
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder={running ? 'Write your next message…' : (placeholder ?? 'Ask anything…')}
+            // Only the hero box: on the chat home typing is the page's one
+            // task, while a docked box must not steal focus on navigation.
+            autoFocus={hero}
+            aria-describedby="composer-help"
+            aria-invalid={tooLong || undefined}
+            className={cn(
+              'max-h-50 w-full resize-none bg-transparent px-2 outline-none placeholder:text-muted-foreground/80',
+              hero ? 'min-h-14 py-2 text-base' : 'min-h-10 py-1.5 text-[15px]',
+            )}
+          />
+
+          {/* The toolbar: what to attach and which model answers on the left,
+              send or stop on the right. */}
+          <div className="flex items-center gap-1">
             {onAttach ? (
               <>
                 <input
@@ -141,68 +178,44 @@ export function Composer({
                   disabled={attaching}
                   aria-label={attaching ? 'Uploading document' : 'Attach a PDF'}
                   title="Attach a PDF"
-                  className="shrink-0 text-muted-foreground"
+                  className="size-8 shrink-0 text-muted-foreground"
                 >
                   <Paperclip className="size-4" aria-hidden />
                 </Button>
               </>
             ) : null}
-            <label htmlFor="composer" className="sr-only">
-              Message
-            </label>
-            <textarea
-              id="composer"
-              ref={textareaRef}
-              rows={1}
-              value={value}
-              onChange={(event) => {
-                setValue(event.target.value)
-                // Grow with the content up to a ceiling, then scroll.
-                const element = event.target
-                element.style.height = 'auto'
-                element.style.height = `${Math.min(element.scrollHeight, 200)}px`
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={running ? 'Write your next message…' : (placeholder ?? 'Ask anything…')}
-              // Only the hero box: on the chat home typing is the page's one
-              // task, while a docked box must not steal focus on navigation.
-              autoFocus={hero}
-              aria-describedby="composer-help"
-              aria-invalid={tooLong || undefined}
-              className={cn(
-                'max-h-50 flex-1 resize-none bg-transparent px-1.5 outline-none placeholder:text-muted-foreground/80',
-                hero ? 'min-h-14 py-2 text-base' : 'min-h-9 py-1.5 text-[15px]',
+            {modelPicker}
+            <div className="ml-auto">
+              {running ? (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="shrink-0 rounded-full"
+                  onClick={onStop}
+                  disabled={stopping || !onStop}
+                  aria-label={stopping ? 'Stopping' : 'Stop answering'}
+                >
+                  <Square className="size-3.5 fill-current" aria-hidden />
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  size="icon"
+                  variant="ink"
+                  className={cn(
+                    'shrink-0 rounded-full',
+                    // Grey until there is something to send, so the colour
+                    // itself says "ready".
+                    !canSend && 'bg-none bg-muted text-muted-foreground shadow-none',
+                  )}
+                  disabled={!canSend}
+                  aria-label="Send message"
+                >
+                  <ArrowUp className="size-4" strokeWidth={2.5} aria-hidden />
+                </Button>
               )}
-            />
-            {running ? (
-              <Button
-                type="button"
-                size="icon"
-                variant="outline"
-                className="shrink-0 rounded-full"
-                onClick={onStop}
-                disabled={stopping || !onStop}
-                aria-label={stopping ? 'Stopping' : 'Stop answering'}
-              >
-                <Square className="size-3.5 fill-current" aria-hidden />
-              </Button>
-            ) : (
-              <Button
-                type="submit"
-                size="icon"
-                variant="ink"
-                className={cn(
-                  'shrink-0 rounded-full',
-                  // Grey until there is something to send, so the colour
-                  // itself says "ready".
-                  !canSend && 'bg-none bg-muted text-muted-foreground shadow-none',
-                )}
-                disabled={!canSend}
-                aria-label="Send message"
-              >
-                <ArrowUp className="size-4" strokeWidth={2.5} aria-hidden />
-              </Button>
-            )}
+            </div>
           </div>
         </div>
 

@@ -163,6 +163,53 @@ all of them. `last_used_at` is updated at most once a minute.
 | `conversations:read` | `list_conversations`, `get_messages`, `search_documents`, the `conversation://` resource |
 | `runs:create` | `ask`. Continuing an existing conversation needs `conversations:read` as well |
 
+### AI provider (your own LLM key)
+
+A user can answer with their own API key instead of the server's model
+([ADR-0020](adr/0020-bring-your-own-llm-key.md)). Browser bearer token only:
+a personal access token cannot read or replace the key.
+
+| Method | Path | Purpose | Success |
+| --- | --- | --- | --- |
+| GET | `/users/me/llm-settings` | Providers on offer, the saved keys (described), the server's model, and which model answers next | `200` |
+| PUT | `/users/me/llm-credentials/{provider}` | Check a key, save it (replacing that provider's), and switch to it | `200` |
+| DELETE | `/users/me/llm-credentials/{provider}` | Forget a provider's key; idempotent | `204` |
+| PUT | `/users/me/llm-selection` | Switch models; instant, no provider call | `200` |
+
+Each PUT answers with the whole settings object:
+
+```json
+PUT /api/v1/users/me/llm-credentials/anthropic
+{ "model": "claude-sonnet-5-5", "api_key": "sk-ant-..." }
+
+200
+{
+  "providers": [{ "id": "anthropic", "label": "Anthropic", "default_model": "...",
+                  "suggested_models": ["..."], "key_url": "https://..." }, ...],
+  "credentials": [{ "provider": "anthropic", "model": "claude-sonnet-5-5",
+                    "key_hint": "wxyz", "is_active": true,
+                    "verified_at": "...", "updated_at": "..." }],
+  "server_model": { "model": "gpt-4o-mini" },
+  "selection": { "source": "user", "provider": "anthropic", "model": "claude-sonnet-5-5" }
+}
+
+PUT /api/v1/users/me/llm-selection
+{ "provider": "openai", "model": "gpt-4o" }      // a saved key, any model
+{ "provider": null, "model": null }              // the app's default model
+```
+
+A key is never returned, only its last four characters. Saving sends one
+16-token request to the provider; nothing is saved unless it succeeds
+(`422 llm_key_invalid`, `422 llm_model_rejected`, `503 llm_key_check_unavailable`).
+`{provider}` is a preset id from `GET .../llm-settings` (`422 llm_provider_unknown`
+otherwise). Checks are limited to `RATE_LIMIT_LLM_KEY_CHECKS` (10) per user per
+hour. Switching to a provider with no saved key is `404 llm_credential_not_found`;
+to the default when the server has none, `409 llm_default_unavailable`.
+
+`selection` is the model the next run will use: the active key, else the
+server's model, else the most recently checked key. It is `null` when there is
+none, and runs are then refused (`409 llm_key_required`).
+
 ### Conversations
 
 All routes require a bearer token. Every query is constrained by the caller's
@@ -354,7 +401,9 @@ and increases by exactly one. Lines beginning with `:` are heartbeats (every
 
 Exactly one terminal event ends every stream. Failure codes: `llm_unavailable`,
 `llm_auth_failed` (the model provider rejected the server's key; not
-retryable), `run_timeout`, `run_interrupted` (server shutdown or a crashed process),
+retryable), `llm_key_rejected` (the provider rejected the user's own key; not
+retryable, fixed in AI provider settings), `llm_model_unavailable` (the user's
+provider has no such model; choose another), `run_timeout`, `run_interrupted` (server shutdown or a crashed process),
 `internal_error`. A searched answer that could not be verified is not a
 failure: it completes with `message.degraded: true`.
 
@@ -473,5 +522,13 @@ progress as it goes. Closing the request cancels the run
 | `service_unavailable` | 503 | A required dependency (Redis for run creation, SMTP for resending a confirmation) is down, or every PDF parse slot is busy; retry shortly |
 | `access_token_not_found` | 404 | Unknown access token, a revoked one, or another user's |
 | `access_token_limit_reached` | 409 | The account already has `MAX_ACCESS_TOKENS_PER_USER` live tokens; `details.limit` |
+| `llm_key_required` | 409 | No API key of the user's own and no server model; add one in AI provider settings |
+| `llm_key_unreadable` | 409 | The saved key can no longer be decrypted (`CREDENTIAL_ENCRYPTION_KEY` changed); enter it again |
+| `llm_default_unavailable` | 409 | Switching to the app's default model, but the server has none |
+| `llm_credential_not_found` | 404 | Switching to a provider with no saved key |
+| `llm_provider_unknown` | 422 | Not a provider from `GET /users/me/llm-settings` |
+| `llm_key_invalid` | 422 | The provider rejected the key when it was checked |
+| `llm_model_rejected` | 422 | The key was accepted but the request was not: usually a wrong model name |
+| `llm_key_check_unavailable` | 503 | The provider was down, slow, or rate-limiting the key during the check |
 | `insufficient_scope` | — | MCP only, in a tool result: the token lacks the scope the tool needs |
 | `internal_error` | 500 | Unexpected failure; quote `request_id` |

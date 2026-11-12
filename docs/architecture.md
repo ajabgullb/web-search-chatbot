@@ -324,6 +324,7 @@ from the model, whether or not anyone is listening, so there is one code path.
 | Searched answer with no valid citation | `degraded`, with a notice that sources could not be verified. |
 | Model unavailable | Terminal `llm_unavailable`; `retryable` only for transient errors. |
 | Model rejects the key (401/403) | Terminal `llm_auth_failed`, not retryable, logged as a warning so a bad or stale key is not mistaken for an outage. |
+| Model rejects a user's own key (ADR-0020) | Terminal `llm_key_rejected`, not retryable, with a message that sends the user to AI provider settings. Not an operator warning. |
 | Run exceeds `RUN_TIMEOUT_SECONDS` | Terminal `run_timeout`, retryable. |
 
 ### Checkpoints versus messages

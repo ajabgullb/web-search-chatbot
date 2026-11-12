@@ -262,6 +262,69 @@ class AccessTokenLimitReached(AppError):
     message = "This account already has the maximum number of access tokens."
 
 
+class LLMKeyRequired(AppError):
+    """No key of the user's own and no server model to fall back on (ADR-0020)."""
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "llm_key_required"
+    message = "Add an API key for an AI provider in AI provider settings to start chatting."
+
+
+class LLMKeyUnreadable(AppError):
+    """The saved key no longer decrypts: CREDENTIAL_ENCRYPTION_KEY changed."""
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "llm_key_unreadable"
+    message = "Your saved API key can no longer be used. Enter it again in AI provider settings."
+
+
+class LLMDefaultUnavailable(AppError):
+    """Asked for the server's model, but the server has none (no LLM_API_KEY)."""
+
+    status_code = status.HTTP_409_CONFLICT
+    code = "llm_default_unavailable"
+    message = "This app has no default model. Choose a model from one of your API keys."
+
+
+class LLMCredentialNotFound(NotFound):
+    """Switching to a provider the user has saved no key for."""
+
+    code = "llm_credential_not_found"
+    message = "Add an API key for this provider first."
+
+
+class LLMProviderUnknown(AppError):
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "llm_provider_unknown"
+    message = "That AI provider is not supported."
+
+
+class LLMKeyInvalid(AppError):
+    """The provider refused the key (401/403) when it was checked."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "llm_key_invalid"
+    message = "The provider rejected this API key. Check that it is correct and active."
+
+
+class LLMModelRejected(AppError):
+    """The key was accepted but the request was not: usually a wrong model name."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "llm_model_rejected"
+    message = (
+        "The provider refused the request. Check the model name, and that your account can use it."
+    )
+
+
+class LLMKeyCheckUnavailable(AppError):
+    """The provider was down, slow, or rate-limiting while the key was checked."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "llm_key_check_unavailable"
+    message = "The provider could not be reached to check this key. Try again in a moment."
+
+
 class InsufficientScope(AppError):
     """An MCP token without the scope a tool needs. Reported to the MCP
     client as a tool error, never as an HTTP status (ADR-0019)."""
