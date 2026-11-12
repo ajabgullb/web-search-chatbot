@@ -52,7 +52,7 @@ export function onSessionChange(listener: SessionListener): () => void {
 let refreshInFlight: Promise<string | null> | null = null
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown
   /**
    * A multipart body (file upload), sent instead of `body`. Content-Type is

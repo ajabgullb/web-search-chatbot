@@ -23,12 +23,14 @@ x-api-environment: &api-environment
   DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-app}
   REDIS_URL: redis://redis:6379/0
   JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (48+ random characters)}
+  CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?set CREDENTIAL_ENCRYPTION_KEY (48+ random characters, not JWT_SECRET)}
   JWT_ISSUER: ${JWT_ISSUER:-web-search-chatbot}
   JWT_AUDIENCE: ${JWT_AUDIENCE:-web-search-chatbot-api}
   LLM_PROVIDER: openai_compatible
   LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
   LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
-  LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY}
+  # Optional (ADR-0020): empty means users must bring their own keys.
+  LLM_API_KEY: ${LLM_API_KEY:-}
   SEARCH_PROVIDER: tavily
   SEARCH_API_KEY: ${SEARCH_API_KEY:?set SEARCH_API_KEY}
   # OpenAI's own endpoint, independent of LLM_BASE_URL (ADR-0015).

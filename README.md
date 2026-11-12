@@ -22,16 +22,25 @@ Phase 11, PDF documents.**
   alongside the web where that helps. A document belongs to one conversation;
   removing it, or the conversation, deletes its text
   ([ADR-0015](docs/adr/0015-chat-scoped-pdf-retrieval.md)).
+- **Your own AI provider.** The model picker in the message box switches
+  between the app's default model and models from your own API keys for
+  OpenAI, Anthropic, Google Gemini, Groq, OpenRouter, Mistral, DeepSeek, or
+  xAI. Pick a model from a provider you have not connected and it asks for
+  the key right there. Keys are checked with one tiny request, stored
+  encrypted, never shown again, and managed under **AI provider** in the
+  sidebar ([ADR-0020](docs/adr/0020-bring-your-own-llm-key.md)).
 - **Production.** The production stack coordinates through Redis, logs
   structured JSON, exposes Prometheus metrics, shuts down gracefully, and
   refuses to start on an unsafe configuration.
 - **Testing.** Unit, integration, contract, end-to-end, and evaluation suites
   back all of this; see [Testing](#testing).
 
-No provider key is needed to run the app or the tests. To get real answers, set
-`LLM_API_KEY` (and `LLM_BASE_URL`/`LLM_MODEL` for a non-OpenAI endpoint such as
-Ollama) and `SEARCH_API_KEY` in `.env`; production refuses to start without
-them. PDF documents are embedded with OpenAI's `text-embedding-3-small`: an
+No provider key is needed to run the app or the tests. To get real answers,
+either set `LLM_API_KEY` (and `LLM_BASE_URL`/`LLM_MODEL` for a non-OpenAI
+endpoint such as Ollama) in `.env` as the default model for everyone, or leave
+it empty and have each user add their own key under **AI provider**. Web search
+needs `SEARCH_API_KEY` either way, and production refuses to start without it
+or without a `CREDENTIAL_ENCRYPTION_KEY`, which encrypts users' saved keys. PDF documents are embedded with OpenAI's `text-embedding-3-small`: an
 OpenAI `LLM_API_KEY` covers that too, and any other chat provider needs
 `EMBEDDING_API_KEY` as well.
 

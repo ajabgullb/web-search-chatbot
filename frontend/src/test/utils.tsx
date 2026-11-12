@@ -23,6 +23,31 @@ export const tokenPayload = {
   user: testUser,
 }
 
+export const testProviders = [
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    default_model: 'gpt-4.1-mini',
+    suggested_models: ['gpt-4.1-mini', 'gpt-4o'],
+    key_url: 'https://platform.openai.com/api-keys',
+  },
+  {
+    id: 'anthropic',
+    label: 'Anthropic',
+    default_model: 'claude-sonnet-5-5',
+    suggested_models: ['claude-sonnet-5-5', 'claude-haiku-5-5'],
+    key_url: 'https://console.anthropic.com/settings/keys',
+  },
+]
+
+/** No key of the user's own; the server's model answers. */
+export const defaultLlmSettings = {
+  providers: testProviders,
+  credentials: [] as unknown[],
+  server_model: { model: 'gpt-4o-mini' } as { model: string } | null,
+  selection: { source: 'server', provider: null, model: 'gpt-4o-mini' } as unknown,
+}
+
 export function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -77,6 +102,11 @@ export function stubApi(routes: Record<string, RouteHandler>) {
     ]) {
       const handler = routes[key]
       if (handler) return Promise.resolve(handler({ url, init }))
+    }
+    // The chat shell asks on every page whether there is a model to answer
+    // with (ADR-0020). Unless a test says otherwise, there is: the server's.
+    if (method === 'GET' && path === '/users/me/llm-settings') {
+      return Promise.resolve(jsonResponse(200, defaultLlmSettings))
     }
     return Promise.resolve(errorResponse(401, 'authentication_required'))
   })

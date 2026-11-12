@@ -34,6 +34,7 @@ def production_settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "environment": Environment.production,
         "jwt_secret": "a" * 40,
+        "credential_encryption_key": "b" * 40,
         "frontend_origin": "https://app.example.com",
         "llm_api_key": "sk-not-a-real-key",
         "search_api_key": "tvly-not-a-real-key",
@@ -63,12 +64,30 @@ def test_production_rejects_the_development_secret() -> None:
 def test_production_requires_provider_credentials() -> None:
     """An API that boots without them looks healthy and fails on the first
     question a user asks. Refuse at startup instead."""
-    with pytest.raises(ValidationError, match="LLM_API_KEY"):
-        production_settings(llm_api_key="")
     with pytest.raises(ValidationError, match="SEARCH_API_KEY"):
         production_settings(search_api_key="")
     with pytest.raises(ValidationError, match="EMBEDDING_API_KEY"):
         production_settings(embedding_api_key="", llm_base_url="https://api.groq.com/openai/v1")
+
+
+def test_production_runs_without_a_server_llm_key() -> None:
+    """ADR-0020: with no server model, every user brings their own key."""
+    assert production_settings(llm_api_key="").llm_api_key == ""
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["dev-insecure-credential-key-not-for-production", "a" * 40],
+    ids=["development default", "same as JWT_SECRET"],
+)
+def test_production_rejects_a_weak_credential_encryption_key(key: str) -> None:
+    with pytest.raises(ValidationError, match="CREDENTIAL_ENCRYPTION_KEY"):
+        production_settings(credential_encryption_key=key)
+
+
+def test_credential_encryption_key_has_a_minimum_length() -> None:
+    with pytest.raises(ValidationError, match="CREDENTIAL_ENCRYPTION_KEY"):
+        Settings(credential_encryption_key="too-short")
 
 
 def test_production_reuses_an_openai_chat_key_for_embeddings() -> None:

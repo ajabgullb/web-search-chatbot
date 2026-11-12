@@ -34,6 +34,14 @@ export type ApiErrorCode =
   | 'service_unavailable'
   | 'access_token_not_found'
   | 'access_token_limit_reached'
+  | 'llm_key_required'
+  | 'llm_key_unreadable'
+  | 'llm_provider_unknown'
+  | 'llm_key_invalid'
+  | 'llm_model_rejected'
+  | 'llm_key_check_unavailable'
+  | 'llm_default_unavailable'
+  | 'llm_credential_not_found'
 
 /**
  * A failed API call, carrying the server's error envelope.

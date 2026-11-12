@@ -74,6 +74,8 @@ ErrorCode = Literal[
     "search_unavailable",
     "llm_unavailable",
     "llm_auth_failed",
+    "llm_key_rejected",
+    "llm_model_unavailable",
     "run_timeout",
     "internal_error",
 ]

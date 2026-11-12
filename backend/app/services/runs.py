@@ -16,6 +16,8 @@ whether a run may start at all, and records it. The rules it enforces:
   at all.
 - **Spend limits** — a run needs a verified email address, and each user may
   start at most ``DAILY_RUN_LIMIT_PER_USER`` runs in any rolling 24 hours.
+- **A model to answer with** — the user's own key or the server's model
+  (ADR-0020). With neither, the run is refused before anything is stored.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ from app.api.errors import (
     DailyQuotaExceeded,
     EmailNotVerified,
     IdempotencyKeyReused,
+    LLMKeyRequired,
     MessageEmpty,
     MessageNotFound,
     MessageTooLong,
@@ -57,6 +60,7 @@ from app.repositories.messages import MessageRepository
 from app.repositories.runs import RunRepository
 from app.schemas.runs import RunCreate
 from app.services.conversations import ConversationService, MessageWithCitations
+from app.services.llm_credentials import ResolvedLLM
 from app.services.run_executor import RunManager
 
 logger = logging.getLogger(__name__)
@@ -136,6 +140,7 @@ class RunService:
         conversation_id: uuid.UUID,
         payload: RunCreate,
         idempotency_key: str,
+        llm: ResolvedLLM | None,
     ) -> AcceptedRun | ReplayedRun:
         if self._settings.require_email_verification and not user.is_verified:
             raise EmailNotVerified
@@ -154,6 +159,12 @@ class RunService:
         existing = await self._runs.get_by_idempotency_key(user_id=user.id, key=idempotency_key)
         if existing is not None:
             return await self._replay(existing, fingerprint)
+
+        # After the replay check, which needs no model: a client retrying an
+        # accepted request gets its answer back even if the key has since
+        # been removed.
+        if llm is None:
+            raise LLMKeyRequired
 
         if content is not None:
             self._check_length(content)
@@ -186,6 +197,7 @@ class RunService:
                 retry_message_id=payload.retry_message_id,
                 idempotency_key=idempotency_key,
                 fingerprint=fingerprint,
+                llm=llm,
             )
             await self._session.commit()
             committed = True
@@ -280,6 +292,7 @@ class RunService:
         retry_message_id: uuid.UUID | None,
         idempotency_key: str,
         fingerprint: str,
+        llm: ResolvedLLM,
     ) -> AcceptedRun:
         if content is not None:
             user_message = await self._conversations.stage_message(
@@ -302,8 +315,8 @@ class RunService:
                 status=RunStatus.queued,
                 idempotency_key=idempotency_key,
                 request_fingerprint=fingerprint,
-                provider=self._settings.llm_provider,
-                model=self._settings.llm_model,
+                provider=llm.provider_id,
+                model=llm.model,
                 prompt_version=PROMPT_VERSION,
                 search_count=0,
             )

@@ -22,6 +22,7 @@ The repository is a monorepo with `backend/` and `frontend/` under one root. Fol
 10. Users can never read, alter, or run another user's conversations.
 11. (v2, [ADR-0015](docs/adr/0015-chat-scoped-pdf-retrieval.md)) Users can upload PDF documents to a conversation, see their processing status, and remove them. Answers in that conversation can draw on those documents and cite them by filename and page. A document belongs to exactly one conversation and is never visible from any other.
 12. ([ADR-0019](docs/adr/0019-mcp-endpoint-for-ai-clients.md)) Users can connect their own MCP clients to their account with scoped, expiring, revocable personal access tokens. The MCP endpoint offers `ask`, `list_conversations`, `get_messages`, and `search_documents` over the same services and limits as the REST API, and a token never works anywhere else.
+13. ([ADR-0020](docs/adr/0020-bring-your-own-llm-key.md)) Users can save their own API keys for a fixed list of LLM providers (one per provider) and switch between those models and the server's from a model picker in the chat box. Keys are checked on save, stored encrypted, and never returned. Without a key they use the server's model; if the server has none, they must add a key before chatting.
 
 ### Explicit non-goals
 
@@ -168,6 +169,7 @@ Use UUID primary keys, UTC timezone-aware timestamps, foreign keys, useful index
 - `citations`: `id`, `message_id`, stable ordinal, `kind` (`web` or `document`), canonical URL (required for web citations), title, optional publisher, snippet, retrieved timestamp, optional published timestamp, and for document citations the chunk reference and page.
 - `documents`: `id`, `user_id`, `conversation_id`, sanitized filename, content SHA-256, size, page/char/chunk counts, status (`processing`, `ready`, `failed`), error code, embedding model and dimensions, embedding token count, ingestion lease, and timestamps. Hard-deleted, never soft-deleted.
 - `personal_access_tokens` (ADR-0019): `id`, `user_id`, `name`, SHA-256 `token_hash`, display `token_prefix`, `scopes`, `expires_at`, `last_used_at`, `revoked_at`, and timestamps.
+- `llm_credentials` (ADR-0020): `id`, `user_id`, provider preset id (unique per user), `model`, AES-256-GCM `encrypted_api_key` bound to the owner, `key_hint` (last four characters), `is_active` (at most one per user), `verified_at`, and timestamps.
 - `document_chunks`: `id`, `document_id`, denormalized `user_id` and `conversation_id`, ordinal, page, text, generated full-text `tsvector`, and a nullable embedding vector.
 
 Add unique `(conversation_id, sequence_number)` and indexes for conversation listing, message pagination, active sessions, and run status. All ownership queries must constrain by `user_id` at the database query boundary. A guessed UUID must produce `404`, not reveal whether another user's object exists.
@@ -273,6 +275,7 @@ All endpoints live under `/api/v1`. Use Pydantic request and response models; ne
 - `DELETE /conversations/{conversation_id}/documents/{document_id}`
 - `POST /runs/{run_id}/cancel`
 - `GET /access-tokens`, `POST /access-tokens`, `DELETE /access-tokens/{token_id}` (ADR-0019)
+- `GET /users/me/llm-settings`, `PUT /users/me/llm-credentials/{provider}`, `DELETE /users/me/llm-credentials/{provider}`, `PUT /users/me/llm-selection` (ADR-0020)
 - `/mcp` — stateless Streamable HTTP MCP endpoint, personal access tokens only (ADR-0019)
 - `GET /runs/{run_id}` — recovery/polling endpoint
 - `GET /health/live`
@@ -364,6 +367,7 @@ JWT_ISSUER=
 JWT_AUDIENCE=
 ACCESS_TOKEN_TTL_MINUTES=15
 REFRESH_TOKEN_TTL_DAYS=30
+CREDENTIAL_ENCRYPTION_KEY=
 LLM_PROVIDER=openai_compatible
 LLM_MODEL=
 LLM_API_KEY=

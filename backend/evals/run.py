@@ -58,6 +58,8 @@ async def evaluate(subset: Subset, prices: Prices) -> tuple[str, list[CaseOutcom
     if not settings.llm_api_key or not settings.search_api_key:
         raise SystemExit("The live subset needs LLM_API_KEY and SEARCH_API_KEY.")
     llm = build_llm_provider(settings)
+    # Checked above; the factory returns None only without LLM_API_KEY.
+    assert llm is not None
     real_search = build_search_provider(settings)
     try:
         for case in cases_for(dataset, "live"):

@@ -28,6 +28,8 @@ dependencies = [
     "pypdf>=6.21.1",
     "python-multipart>=0.0.32",
     "mcp>=2.3.0",
+    "cryptography>=46.0.0",
+    "langchain-anthropic>=1.0.0",
 ]
 
 [dependency-groups]

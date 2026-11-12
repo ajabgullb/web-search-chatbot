@@ -8,16 +8,22 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.providers.llm import (
+    LangChainLLM,
     LLMAuthError,
+    LLMKeyRejected,
+    LLMModelUnavailable,
     LLMPermanentError,
     LLMTransientError,
     OpenAICompatibleLLM,
     build_llm_provider,
+    build_user_llm,
     classify_llm_error,
 )
+from app.providers.llm_catalog import PRESETS
 from app.providers.search import (
     SearchPermanentError,
     SearchTransientError,
@@ -142,6 +148,11 @@ class TestFactories:
         with pytest.raises(ValueError, match="openai_compatible"):
             build_llm_provider(settings_with(llm_provider="magic"))
 
+    def test_no_server_key_means_no_server_model(self) -> None:
+        """ADR-0020: users bring their own keys instead."""
+        assert build_llm_provider(settings_with(llm_api_key="")) is None
+        assert build_llm_provider(settings_with(llm_api_key="sk-test")) is not None
+
     def test_an_unknown_search_provider_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="tavily"):
             build_search_provider(settings_with(search_provider="magic"))
@@ -159,7 +170,7 @@ class TestLLMStreaming:
     @staticmethod
     def _provider_with(model: object) -> OpenAICompatibleLLM:
         provider = OpenAICompatibleLLM(settings_with(llm_api_key="test"))
-        provider._client = model  # type: ignore[assignment]
+        provider._client = model
         return provider
 
     async def test_text_arrives_in_chunks(self) -> None:
@@ -194,3 +205,86 @@ class AIMessageChunkLike:
     def __init__(self, content: str) -> None:
         self.content = content
         self.usage_metadata = None
+
+
+class TestUserLLM:
+    """Models built from a key a user saved (ADR-0020). Constructed, never called."""
+
+    def test_an_openai_compatible_preset_is_sent_to_its_own_url(self) -> None:
+        from langchain_openai import ChatOpenAI
+
+        llm = build_user_llm(
+            PRESETS["groq"], model="llama-3.3-70b-versatile", api_key="gsk-x", settings=Settings()
+        )
+
+        assert isinstance(llm, LangChainLLM)
+        client = llm._client
+        assert isinstance(client, ChatOpenAI)
+        assert client.openai_api_base == "https://api.groq.com/openai/v1"
+        assert client.model_name == "llama-3.3-70b-versatile"
+        assert isinstance(client.openai_api_key, SecretStr)
+        assert client.openai_api_key.get_secret_value() == "gsk-x"
+        # The server's temperature is for the server's model; some models
+        # refuse anything but their default.
+        assert client.temperature is None
+        assert client.max_retries == 0
+        assert llm._structured_method == "function_calling"
+
+    def test_anthropic_uses_its_native_client(self) -> None:
+        from langchain_anthropic import ChatAnthropic
+
+        llm = build_user_llm(
+            PRESETS["anthropic"], model="claude-sonnet-5-5", api_key="sk-ant-x", settings=Settings()
+        )
+
+        assert isinstance(llm, LangChainLLM)
+        assert isinstance(llm._client, ChatAnthropic)
+        assert llm._client.anthropic_api_url == "https://api.anthropic.com"
+        assert llm._client.max_retries == 0
+        assert llm.model == "claude-sonnet-5-5"
+
+    def test_openai_keeps_strict_json_schema_output(self) -> None:
+        llm = build_user_llm(
+            PRESETS["openai"], model="gpt-4.1", api_key="sk-x", settings=Settings()
+        )
+        assert isinstance(llm, LangChainLLM)
+        assert llm._structured_method == "json_schema"
+
+    async def test_a_rejected_user_key_is_the_users_problem(self) -> None:
+        """The user can fix their own key; the run must say so, not blame the server."""
+        from langchain_core.messages import HumanMessage
+
+        class _Unauthorised:
+            def astream(self, _messages: object) -> object:
+                raise _StatusError(401)
+
+        user = LangChainLLM(_Unauthorised(), model="m", max_output_tokens=10, user_key=True)
+        server = LangChainLLM(_Unauthorised(), model="m", max_output_tokens=10)
+
+        with pytest.raises(LLMKeyRejected):
+            async for _ in user.stream([HumanMessage(content="hi")]):
+                pass
+        with pytest.raises(LLMAuthError) as caught:
+            async for _ in server.stream([HumanMessage(content="hi")]):
+                pass
+        assert not isinstance(caught.value, LLMKeyRejected)
+
+
+async def test_a_missing_user_model_is_its_own_error() -> None:
+    """Users type model names; a 404 tells them to pick another."""
+    from langchain_core.messages import HumanMessage
+
+    class _NotFound:
+        def astream(self, _messages: object) -> object:
+            raise _StatusError(404)
+
+    user = LangChainLLM(_NotFound(), model="m", max_output_tokens=10, user_key=True)
+    server = LangChainLLM(_NotFound(), model="m", max_output_tokens=10)
+
+    with pytest.raises(LLMModelUnavailable):
+        async for _ in user.stream([HumanMessage(content="hi")]):
+            pass
+    with pytest.raises(LLMPermanentError) as caught:
+        async for _ in server.stream([HumanMessage(content="hi")]):
+            pass
+    assert not isinstance(caught.value, LLMModelUnavailable)

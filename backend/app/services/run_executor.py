@@ -105,6 +105,9 @@ class AgentRuntime:
     limits: AgentLimits
     tracing: Tracing | None = None
     documents: DocumentRetriever | None = None
+    # The ``model`` label for token metrics. A user's own model name is free
+    # text, and must not become an unbounded label value (ADR-0020).
+    metrics_model: str | None = None
 
 
 @dataclass(eq=False)
@@ -406,7 +409,7 @@ class RunManager:
                 outcome.type,
                 latency_ms / 1000,
                 error_code=_failure_code(outcome),
-                model=run.model,
+                model=runtime.metrics_model or run.model,
                 prompt_tokens=result.prompt_tokens,
                 completion_tokens=result.completion_tokens,
             )

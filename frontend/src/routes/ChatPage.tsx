@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router'
 import { LogoMark } from '@/components/Logo'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
+import { ModelPicker } from '@/features/aiProvider/ModelPicker'
 import { useAuth } from '@/features/auth/useAuth'
 import { Composer } from '@/features/chat/Composer'
 import { greetingText, pickGreetingIndex } from '@/features/chat/greetings'
@@ -99,8 +100,16 @@ export function ChatPage() {
           </p>
         </div>
 
-        <div className="animate-rise mt-8" style={{ animationDelay: '80ms' }}>
-          <Composer variant="hero" onSubmit={ask} busy={busy} placeholder="Ask anything…" />
+        {/* Raised: each animated block is its own stacking context, so without
+            this the suggestions below would paint over the open model picker. */}
+        <div className="animate-rise relative z-20 mt-8" style={{ animationDelay: '80ms' }}>
+          <Composer
+            variant="hero"
+            onSubmit={ask}
+            busy={busy}
+            placeholder="Ask anything…"
+            modelPicker={<ModelPicker placement="down" />}
+          />
         </div>
 
         {createConversation.isError ? (

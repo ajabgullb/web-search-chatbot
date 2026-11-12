@@ -28,6 +28,7 @@ DB_PASSWORD = "db-leakcheck-password-0123456789"
 VALID_PRODUCTION = {
     "ENVIRONMENT": "production",
     "JWT_SECRET": "p" * 48,
+    "CREDENTIAL_ENCRYPTION_KEY": "c" * 48,
     "FRONTEND_ORIGIN": "https://chat.example.com",
     "DATABASE_URL": f"postgresql+asyncpg://app:{DB_PASSWORD}@db:5432/app",
     "REDIS_URL": "redis://redis:6379/0",
@@ -60,6 +61,12 @@ def test_a_valid_production_configuration_starts() -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_production_boots_without_a_server_llm_key() -> None:
+    """ADR-0020: no server model means users bring their own keys."""
+    result = boot(LLM_API_KEY="")
+    assert result.returncode == 0, result.stderr
+
+
 def test_an_openai_chat_key_covers_embeddings() -> None:
     """No separate EMBEDDING_API_KEY when the chat model is OpenAI's own API."""
     result = boot(EMBEDDING_API_KEY="")
@@ -72,7 +79,7 @@ def test_an_openai_chat_key_covers_embeddings() -> None:
         ({"JWT_SECRET": "dev-insecure-change-me-not-for-production"}, "JWT_SECRET"),
         ({"FRONTEND_ORIGIN": "*"}, "wildcard"),
         ({"FRONTEND_ORIGIN": "http://chat.example.com"}, "https"),
-        ({"LLM_API_KEY": ""}, "LLM_API_KEY"),
+        ({"CREDENTIAL_ENCRYPTION_KEY": "p" * 48}, "CREDENTIAL_ENCRYPTION_KEY"),
         ({"SEARCH_API_KEY": ""}, "SEARCH_API_KEY"),
         (
             {"EMBEDDING_API_KEY": "", "LLM_BASE_URL": "https://api.groq.com/openai/v1"},

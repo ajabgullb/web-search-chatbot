@@ -562,6 +562,31 @@ describe('stopping and retrying', () => {
     )
   })
 
+  it('points a send refused for want of an API key at AI provider settings', async () => {
+    const { routes } = backend()
+    stubApi({
+      ...routes,
+      [`POST /conversations/${CONVERSATION_ID}/runs`]: () =>
+        jsonResponse(409, {
+          error: {
+            code: 'llm_key_required',
+            message: 'Add an API key for an AI provider in AI provider settings to start chatting.',
+            request_id: null,
+            details: null,
+          },
+        }),
+    })
+    await openConversation()
+    await send('hello')
+
+    const bubble = screen.getByRole('article', { name: 'Your message' })
+    expect(await within(bubble).findByText(/not sent/i)).toHaveTextContent('Add an API key')
+    expect(within(bubble).getByRole('link', { name: 'Open AI provider settings' })).toHaveAttribute(
+      'href',
+      '/settings/ai-provider',
+    )
+  })
+
   it('treats a send that never reached the server as not sent', async () => {
     const { routes } = backend()
     stubApi({

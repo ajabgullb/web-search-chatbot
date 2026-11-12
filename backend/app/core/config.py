@@ -27,6 +27,7 @@ _INSECURE_SECRETS = frozenset(
     {
         "dev-insecure-change-me-not-for-production",
         "dev-insecure-change-me",
+        "dev-insecure-credential-key-not-for-production",
         "changeme",
         "secret",
         "",
@@ -159,9 +160,26 @@ class Settings(BaseSettings):
     # whose client is reconnecting through GET /runs/{id}.
     shutdown_drain_seconds: float = 10.0
 
+    # --- Users' own LLM API keys (ADR-0020) ---
+    # Encrypts the keys users save, at rest. Deliberately not JWT_SECRET:
+    # rotating the signing key (which logs everyone out) must not also make
+    # every stored API key undecryptable. Losing this value loses the keys;
+    # users would have to enter them again.
+    credential_encryption_key: str = "dev-insecure-credential-key-not-for-production"
+    # Saving a key makes a small real call to the provider to prove it works.
+    # Limited per user so the endpoint cannot be used to test stolen keys in
+    # bulk, and so a stuck client cannot bill a user's account in a loop.
+    rate_limit_llm_key_checks: int = Field(default=10, ge=1)
+    rate_limit_llm_key_checks_window_seconds: int = Field(default=3600, ge=1)
+    llm_key_check_timeout_seconds: float = Field(default=20.0, gt=0)
+
     # --- LLM provider ---
     # One OpenAI-compatible implementation covers OpenAI, OpenRouter, Groq, and
     # a local Ollama: only the base URL and model name change.
+    #
+    # The server's own model, used by anyone who has not saved a key of their
+    # own (ADR-0020). Optional: with LLM_API_KEY empty there is no server
+    # model, and every user must add a key before their first message.
     llm_provider: str = "openai_compatible"
     llm_model: str = "gpt-4o-mini"
     llm_api_key: str = ""
@@ -312,6 +330,15 @@ class Settings(BaseSettings):
             raise ValueError("JWT_SECRET must be at least 32 characters")
         return value
 
+    @field_validator("credential_encryption_key")
+    @classmethod
+    def _reject_short_encryption_key(cls, value: str) -> str:
+        # Stretched through HKDF into an AES-256 key; HKDF cannot add entropy
+        # the input never had.
+        if len(value) < 32:
+            raise ValueError("CREDENTIAL_ENCRYPTION_KEY must be at least 32 characters")
+        return value
+
     @field_validator("embedding_dimensions")
     @classmethod
     def _match_vector_column(cls, value: int) -> int:
@@ -342,10 +369,20 @@ class Settings(BaseSettings):
             problems.append("FRONTEND_ORIGIN must be an explicit origin, never a wildcard")
         if not self.frontend_origin.startswith("https://"):
             problems.append("FRONTEND_ORIGIN must use https in production")
-        # A production API that boots without provider credentials looks healthy
-        # and fails on the first user question. Refuse at startup instead.
-        if not self.llm_api_key:
-            problems.append("LLM_API_KEY is required in production")
+        if (
+            self.credential_encryption_key in _INSECURE_SECRETS
+            or len(self.credential_encryption_key) < 32
+        ):
+            problems.append(
+                "CREDENTIAL_ENCRYPTION_KEY must be a unique random value of at least "
+                "32 characters in production"
+            )
+        if self.credential_encryption_key == self.jwt_secret:
+            problems.append("CREDENTIAL_ENCRYPTION_KEY must differ from JWT_SECRET")
+        # LLM_API_KEY is optional (ADR-0020): without it users bring their
+        # own keys, and the chat UI asks for one before the first message.
+        # Search has no such fallback, so a production API that boots without
+        # it looks healthy and fails on the first searched question.
         if not self.search_api_key:
             problems.append("SEARCH_API_KEY is required in production")
         if not self.effective_embedding_api_key:

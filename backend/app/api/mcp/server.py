@@ -19,7 +19,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI
 from mcp.server.mcpserver import Context, MCPServer
@@ -28,7 +28,11 @@ from mcp_types import ToolAnnotations
 from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import agent_runtime_from_state, enforce_limit
+from app.api.dependencies import (
+    agent_runtime_from_state,
+    enforce_limit,
+    llm_credential_service_from_state,
+)
 from app.api.errors import (
     AccountInactive,
     AppError,
@@ -49,7 +53,6 @@ from app.api.mcp.schemas import (
 from app.core import telemetry
 from app.core.config import Settings
 from app.core.request_context import get_request_id
-from app.core.run_lock import RunLock
 from app.db.session import Database
 from app.models.personal_access_token import TokenScope
 from app.models.user import User
@@ -69,6 +72,7 @@ from app.schemas.runs import (
 from app.services.access_tokens import Principal
 from app.services.conversations import ConversationService
 from app.services.documents import DocumentService, estimate_tokens
+from app.services.llm_credentials import ResolvedLLM
 from app.services.run_executor import RunHandle, RunManager
 from app.services.runs import AcceptedRun, RunService
 
@@ -320,13 +324,13 @@ def build_mcp_server(app: FastAPI, settings: Settings) -> MCPServer:
                 limit=settings.rate_limit_runs,
                 window_seconds=settings.rate_limit_runs_window_seconds,
             )
-            accepted = await _accept_run(
-                database(), settings, state.run_lock, principal, question, conversation_id
+            accepted, llm = await _accept_run(
+                state, database(), settings, principal, question, conversation_id
             )
             handle = manager.start(
                 run=accepted.run,
                 user_message=accepted.user_message,
-                runtime=agent_runtime_from_state(state),
+                runtime=agent_runtime_from_state(state, llm),
                 request_id=get_request_id(),
             )
             completed = await _follow(handle, manager, ctx)
@@ -491,14 +495,15 @@ def build_mcp_server(app: FastAPI, settings: Settings) -> MCPServer:
 
 
 async def _accept_run(
+    state: Any,
     database: Database,
     settings: Settings,
-    run_lock: RunLock,
     principal: Principal,
     question: str,
     conversation_id: uuid.UUID | None,
-) -> AcceptedRun:
-    """Record the question and its run, exactly as ``POST .../runs`` does.
+) -> tuple[AcceptedRun, ResolvedLLM]:
+    """Record the question and its run, exactly as ``POST .../runs`` does,
+    and choose its model the same way: the user's own key, else the server's.
 
     With no conversation given, one is created first. If the run is then
     refused (the daily allowance, say), that conversation is removed again so
@@ -507,6 +512,11 @@ async def _accept_run(
     created: uuid.UUID | None = None
     async with database.open_session() as session:
         user = await _load_user(session, principal)
+        # A missing model is refused by RunService.create, after the checks
+        # that come first (verification, ownership), exactly as over REST.
+        llm = await llm_credential_service_from_state(state, session, settings).resolve(
+            user_id=user.id, server_llm=state.llm_provider
+        )
         if conversation_id is None:
             # Checked here too, so an unverified account gets the real reason
             # rather than a conversation it cannot use.
@@ -515,21 +525,24 @@ async def _accept_run(
             conversation = await ConversationService(session).create(user=user)
             created = conversation_id = conversation.id
         try:
-            outcome = await RunService(session, settings, run_lock).create(
+            outcome = await RunService(session, settings, state.run_lock).create(
                 user=user,
                 conversation_id=conversation_id,
                 payload=RunCreate(content=question),
                 # Fresh per call: an MCP client has no idempotency key to send,
                 # and a retried tool call is a new question.
                 idempotency_key=f"mcp-{uuid.uuid4()}",
+                llm=llm,
             )
         except AppError:
             if created is not None:
                 await _discard_conversation(database, principal.user_id, created)
             raise
-    # A fresh key never matches an earlier run, so this is never a replay.
+    # A fresh key never matches an earlier run, so this is never a replay,
+    # and an accepted run always had a model.
     assert isinstance(outcome, AcceptedRun)
-    return outcome
+    assert llm is not None
+    return outcome, llm
 
 
 async def _discard_conversation(

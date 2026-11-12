@@ -9,6 +9,7 @@ import { useParams } from 'react-router'
 import { ApiError } from '@/api/errors'
 import { Alert } from '@/components/ui/Alert'
 import { FullPageSpinner } from '@/components/FullPageSpinner'
+import { ModelPicker } from '@/features/aiProvider/ModelPicker'
 import { Composer } from '@/features/chat/Composer'
 import { DocumentChips } from '@/features/chat/DocumentAttachments'
 import { PDF_ACCEPT, useDocumentAttachments } from '@/features/chat/useDocumentAttachments'
@@ -104,6 +105,7 @@ export function ConversationPage() {
         attaching={attachments.uploading}
         accept={PDF_ACCEPT}
         attachments={<DocumentChips attachments={attachments} running={running} />}
+        modelPicker={<ModelPicker />}
       />
     </main>
   )
