@@ -52,6 +52,10 @@ def settings() -> Settings:
         log_level="WARNING",
         frontend_origin=TEST_ORIGIN,
         jwt_secret="test-secret-value-that-is-long-enough-for-hs256",
+        # Never a developer's real key from .env: with one, the server would
+        # have a model locally but not in CI, and tests would disagree.
+        # Tests that run the agent install a fake model explicitly.
+        llm_api_key="",
         # Empty host selects the logging sender, so no test needs an SMTP
         # server; the recording double replaces it where the body matters.
         smtp_host="",

@@ -33,13 +33,13 @@ test('a PDF attached in the message box is read and cited by page, until it is r
   await register(page, 'docs')
   await startConversation(page)
 
-  // The button lives in the message box, beside where one types.
+  // The button lives in the message box: in the toolbar under the text.
   const box = page.getByRole('textbox', { name: 'Message', exact: true })
   const paperclip = page.getByRole('button', { name: 'Attach a PDF' })
   await expect(paperclip).toBeVisible()
   expect(
     await paperclip.evaluate(
-      (button, textarea) => button.parentElement === textarea?.parentElement,
+      (button, textarea) => button.parentElement?.parentElement === textarea?.parentElement,
       await box.elementHandle(),
     ),
   ).toBe(true)

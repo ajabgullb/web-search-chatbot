@@ -232,9 +232,11 @@ describe('conversation history', () => {
     renderApp(<App />, { route: `/chat/${CONVERSATION_ID}` })
 
     expect(await screen.findByText('How does keyset pagination work?')).toBeInTheDocument()
-    expect(await screen.findByText(/it uses the/i)).toBeInTheDocument()
+    // The assistant turn is rendered by the lazy markdown chunk: the same
+    // slow-under-load import as the next test, so the same wait and budget.
+    expect(await screen.findByText(/it uses the/i, {}, { timeout: 10_000 })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'Keyset pagination' })).toBeInTheDocument()
-  })
+  }, 15_000)
 
   it('renders assistant turns as markdown and user turns as plain text', async () => {
     stubApi(withHistory)

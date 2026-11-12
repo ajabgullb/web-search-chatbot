@@ -334,8 +334,10 @@ export function ModelPicker({ placement = 'up' }: ModelPickerProps) {
         </div>
       ) : null}
 
-      {/* Always mounted, so the change of model is announced when it happens. */}
-      <span role="status" className="sr-only">
+      {/* Always mounted, so the change of model is announced when it happens.
+          A live region, not role="status": the page's status region belongs
+          to the answer's progress. */}
+      <span aria-live="polite" className="sr-only">
         {announcement}
       </span>
     </div>

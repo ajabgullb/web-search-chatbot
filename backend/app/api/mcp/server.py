@@ -38,7 +38,6 @@ from app.api.errors import (
     AppError,
     EmailNotVerified,
     InsufficientScope,
-    LLMKeyRequired,
     ServiceUnavailable,
 )
 from app.api.mcp.schemas import (
@@ -513,13 +512,11 @@ async def _accept_run(
     created: uuid.UUID | None = None
     async with database.open_session() as session:
         user = await _load_user(session, principal)
+        # A missing model is refused by RunService.create, after the checks
+        # that come first (verification, ownership), exactly as over REST.
         llm = await llm_credential_service_from_state(state, session, settings).resolve(
             user_id=user.id, server_llm=state.llm_provider
         )
-        if llm is None:
-            # Before a conversation is created for the question: a refusal
-            # must leave nothing behind.
-            raise LLMKeyRequired
         if conversation_id is None:
             # Checked here too, so an unverified account gets the real reason
             # rather than a conversation it cannot use.
@@ -541,8 +538,10 @@ async def _accept_run(
             if created is not None:
                 await _discard_conversation(database, principal.user_id, created)
             raise
-    # A fresh key never matches an earlier run, so this is never a replay.
+    # A fresh key never matches an earlier run, so this is never a replay,
+    # and an accepted run always had a model.
     assert isinstance(outcome, AcceptedRun)
+    assert llm is not None
     return outcome, llm
 
 
